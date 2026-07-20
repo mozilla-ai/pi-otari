@@ -38,6 +38,72 @@ function toolChunk(delta: Record<string, unknown>, finishReason: string | null =
 describe("Pi–Otari integration", () => {
   afterEach(() => vi.unstubAllEnvs());
 
+  it("retries without reasoning effort when Otari fails before streaming", async () => {
+    let completionCount = 0;
+    let firstPayload: Record<string, unknown> | undefined;
+    let secondPayload: Record<string, unknown> | undefined;
+    const server = createServer(async (request, response) => {
+      if (request.method === "GET" && request.url === "/v1/models") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "test-model" }] }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/v1/chat/completions") {
+        completionCount += 1;
+        const payload = await body(request);
+        if (completionCount === 1) {
+          firstPayload = payload;
+          response.writeHead(502);
+          response.end();
+          return;
+        }
+        secondPayload = payload;
+        sse(response, [
+          toolChunk({ role: "assistant", content: "done" }),
+          toolChunk({}, "stop"),
+        ]);
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Expected TCP server");
+
+    vi.stubEnv("OTARI_API_KEY", "tk_integration");
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/v1`);
+    const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-integration-"));
+    const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      extensionFactories: [createOtariExtension({ agentDir: () => agentDir })],
+    });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({
+      cwd,
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(cwd),
+      thinkingLevel: "medium",
+    });
+    try {
+      const model = session.modelRuntime.getModel("otari", "test-model");
+      expect(model).toBeDefined();
+      await session.setModel(model!);
+      await session.prompt("Reply with done.");
+      expect(firstPayload?.reasoning_effort).toBe("high");
+      expect((firstPayload?.messages as Array<{ role: string }> | undefined)?.[0]?.role).toBe("system");
+      expect(secondPayload).not.toHaveProperty("reasoning_effort");
+      expect(completionCount).toBe(2);
+      expect(session.state.messages.at(-1)?.role).toBe("assistant");
+    } finally {
+      session.dispose();
+      server.close();
+      await once(server, "close");
+    }
+  });
+
   it("routes the selected model through Otari and continues after a tool call", async () => {
     let completionCount = 0;
     const server = createServer(async (request, response) => {
