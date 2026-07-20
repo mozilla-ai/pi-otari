@@ -23,7 +23,10 @@ describe("registerOtariProvider", () => {
       baseUrl: config.baseUrl,
       api: "openai-completions",
       apiKey: "$OTARI_API_KEY",
-      models: [expect.objectContaining({ id: "anthropic:claude" })],
+      models: [expect.objectContaining({
+        id: "anthropic:claude",
+        compat: { maxTokensField: "max_tokens" },
+      })],
     }));
     expect(JSON.stringify(vi.mocked(pi.registerProvider).mock.calls)).not.toContain(config.token);
   });
