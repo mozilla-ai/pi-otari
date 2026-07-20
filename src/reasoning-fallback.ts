@@ -2,7 +2,6 @@ import {
   createAssistantMessageEventStream,
   type Api,
   type AssistantMessage,
-  type AssistantMessageEvent,
   type Context,
   type Model,
   type SimpleStreamOptions,
