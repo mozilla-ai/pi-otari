@@ -25,7 +25,12 @@ describe("registerOtariProvider", () => {
       apiKey: "$OTARI_API_KEY",
       models: [expect.objectContaining({
         id: "anthropic:claude",
-        compat: { maxTokensField: "max_tokens" },
+        reasoning: true,
+        thinkingLevelMap: expect.objectContaining({ medium: "high" }),
+        compat: {
+          maxTokensField: "max_tokens",
+          supportsDeveloperRole: false,
+        },
       })],
     }));
     expect(JSON.stringify(vi.mocked(pi.registerProvider).mock.calls)).not.toContain(config.token);
