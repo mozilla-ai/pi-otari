@@ -14,9 +14,9 @@ export OTARI_API_KEY=tk_example
 pi
 ```
 
-Run `/scoped-models` first, search for `otari`, enable the models you want, and press Ctrl+S to save the updated scope.
+> **Note:** Otari models do not appear in `/model` until you run `/scoped-models`, search for `otari`, enable the models you want, and press Ctrl+S to save the scope.
 
-Then open Pi's built-in `/model` selector and choose an `otari/*` model. No Otari-specific slash command is required. Pi sends requests for that selected provider to `https://api.otari.ai/v1/chat/completions`; local Pi tools continue to run according to your Pi configuration.
+Then open Pi's built-in `/model` selector and choose one of the enabled Otari models. No Otari-specific slash command is required. Pi sends requests for that selected provider to `https://api.otari.ai/v1/chat/completions`; local Pi tools continue to run according to your Pi configuration.
 
 ## Model discovery
 
