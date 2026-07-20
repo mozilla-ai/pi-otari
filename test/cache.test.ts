@@ -11,8 +11,12 @@ async function tempAgentDir(): Promise<string> {
 describe("model cache", () => {
   it("round-trips normalized models", async () => {
     const agentDir = await tempAgentDir();
-    await writeModelCache(agentDir, [{ id: "mzai:model", source: "managed-catalog" }]);
-    expect((await readModelCache(agentDir)).cache?.models[0].id).toBe("mzai:model");
+    await writeModelCache(agentDir, [
+      { id: "mzai:model", source: "managed-catalog" },
+    ]);
+    expect((await readModelCache(agentDir)).cache?.models[0].id).toBe(
+      "mzai:model",
+    );
     if (process.platform !== "win32") {
       expect((await stat(cachePath(agentDir))).mode & 0o777).toBe(0o600);
     }
@@ -32,9 +36,15 @@ describe("model cache", () => {
     await writeModelCache(agentDir, []);
     await writeFile(
       cachePath(agentDir),
-      JSON.stringify({ schemaVersion: 2, fetchedAt: new Date().toISOString(), models: [] }),
+      JSON.stringify({
+        schemaVersion: 2,
+        fetchedAt: new Date().toISOString(),
+        models: [],
+      }),
     );
-    expect((await readModelCache(agentDir)).diagnostic?.code).toBe("cache-version");
+    expect((await readModelCache(agentDir)).diagnostic?.code).toBe(
+      "cache-version",
+    );
   });
 
   it("rejects malformed model entries", async () => {
@@ -48,6 +58,8 @@ describe("model cache", () => {
         models: [{ source: "standard" }],
       }),
     );
-    expect((await readModelCache(agentDir)).diagnostic?.code).toBe("cache-invalid");
+    expect((await readModelCache(agentDir)).diagnostic?.code).toBe(
+      "cache-invalid",
+    );
   });
 });

@@ -24,7 +24,13 @@
     "test:watch": "vitest",
     "test:live": "node --experimental-strip-types test/live-smoke.ts",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "lint": "biome lint .",
+    "format:check": "biome format .",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,json}": "biome check --write"
   },
   "pi": {
     "extensions": [
@@ -35,8 +41,11 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.4",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@types/node": "^24.12.4",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.1.0",
     "typebox": "^1.1.38",
     "typescript": "^5.9.3",
     "vitest": "^4.1.9"

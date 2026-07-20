@@ -20,17 +20,29 @@ function parseTimeout(value: string | undefined): number {
   if (value === undefined || value.trim() === "") return DEFAULT_TIMEOUT_MS;
   const timeout = Number(value);
   if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 30000) {
-    throw new ConfigError("OTARI_DISCOVERY_TIMEOUT_MS must be an integer between 1000 and 30000");
+    throw new ConfigError(
+      "OTARI_DISCOVERY_TIMEOUT_MS must be an integer between 1000 and 30000",
+    );
   }
   return timeout;
 }
 
 function parseModels(value: string | undefined): string[] {
   if (!value) return [];
-  return [...new Set(value.split(",").map((item) => item.trim()).filter(Boolean))];
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
-function parseBaseUrl(value: string | undefined): { baseUrl: string; officialHosted: boolean } {
+function parseBaseUrl(value: string | undefined): {
+  baseUrl: string;
+  officialHosted: boolean;
+} {
   let url: URL;
   try {
     url = new URL(value?.trim() || DEFAULT_BASE_URL);
@@ -38,13 +50,22 @@ function parseBaseUrl(value: string | undefined): { baseUrl: string; officialHos
     throw new ConfigError("OTARI_BASE_URL must be a valid absolute URL");
   }
   if (url.username || url.password) {
-    throw new ConfigError("OTARI_BASE_URL must not contain embedded credentials");
+    throw new ConfigError(
+      "OTARI_BASE_URL must not contain embedded credentials",
+    );
   }
   if (url.search || url.hash) {
-    throw new ConfigError("OTARI_BASE_URL must not contain a query string or fragment");
+    throw new ConfigError(
+      "OTARI_BASE_URL must not contain a query string or fragment",
+    );
   }
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname))) {
-    throw new ConfigError("OTARI_BASE_URL must use HTTPS; HTTP is allowed only for loopback hosts");
+  if (
+    url.protocol !== "https:" &&
+    !(url.protocol === "http:" && isLoopbackHost(url.hostname))
+  ) {
+    throw new ConfigError(
+      "OTARI_BASE_URL must use HTTPS; HTTP is allowed only for loopback hosts",
+    );
   }
   const baseUrl = url.toString().replace(/\/+$/, "");
   return {
@@ -53,7 +74,9 @@ function parseBaseUrl(value: string | undefined): { baseUrl: string; officialHos
   };
 }
 
-export function loadOtariConfig(env: NodeJS.ProcessEnv = process.env): OtariConfig {
+export function loadOtariConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): OtariConfig {
   const { baseUrl, officialHosted } = parseBaseUrl(env.OTARI_BASE_URL);
   const token = env.OTARI_API_KEY?.trim() || undefined;
   return {

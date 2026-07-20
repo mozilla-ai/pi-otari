@@ -5,9 +5,16 @@ import {
   parseStandardModelList,
   selectorsToModels,
 } from "./model-mapper.js";
-import type { Diagnostic, DiscoveryResult, ModelCache, OtariConfig, OtariModel } from "./types.js";
+import type {
+  Diagnostic,
+  DiscoveryResult,
+  ModelCache,
+  OtariConfig,
+  OtariModel,
+} from "./types.js";
 
-export const MANAGED_CATALOG_URL = "https://api.otari.ai/api/v1/managed-models-pricing/mzai-models";
+export const MANAGED_CATALOG_URL =
+  "https://api.otari.ai/api/v1/managed-models-pricing/mzai-models";
 
 type Fetcher = typeof fetch;
 
@@ -41,7 +48,12 @@ function transientFallback(
   const stale = cache ? asStaleCache(cache.models) : [];
   return {
     models: mergeModels(stale, environment, [], []),
-    source: stale.length > 0 ? "stale-cache" : environment.length > 0 ? "environment" : "none",
+    source:
+      stale.length > 0
+        ? "stale-cache"
+        : environment.length > 0
+          ? "environment"
+          : "none",
     diagnostics: [diagnostic],
   };
 }
@@ -52,10 +64,16 @@ function successful(
   source: "standard" | "managed-catalog",
 ): DiscoveryResult {
   return {
-    models: source === "standard"
-      ? mergeModels([], environment, [], models)
-      : mergeModels([], environment, models, []),
-    source: models.length > 0 ? source : environment.length > 0 ? "environment" : "none",
+    models:
+      source === "standard"
+        ? mergeModels([], environment, [], models)
+        : mergeModels([], environment, models, []),
+    source:
+      models.length > 0
+        ? source
+        : environment.length > 0
+          ? "environment"
+          : "none",
     diagnostics: [],
     cacheUpdate: models,
   };
@@ -68,7 +86,12 @@ async function managedFallback(
   fetcher: Fetcher,
 ): Promise<DiscoveryResult> {
   try {
-    const response = await request(MANAGED_CATALOG_URL, undefined, config.discoveryTimeoutMs, fetcher);
+    const response = await request(
+      MANAGED_CATALOG_URL,
+      undefined,
+      config.discoveryTimeoutMs,
+      fetcher,
+    );
     if (!response.ok) {
       return transientFallback(cache, environment, {
         level: "warning",
@@ -76,7 +99,11 @@ async function managedFallback(
         message: `Otari managed catalog returned HTTP ${response.status}`,
       });
     }
-    return successful(parseManagedCatalog(await response.json()), environment, "managed-catalog");
+    return successful(
+      parseManagedCatalog(await response.json()),
+      environment,
+      "managed-catalog",
+    );
   } catch {
     return transientFallback(cache, environment, {
       level: "warning",
@@ -109,7 +136,11 @@ export async function discoverModels(
     );
     if (response.ok) {
       try {
-        return successful(parseStandardModelList(await response.json()), environment, "standard");
+        return successful(
+          parseStandardModelList(await response.json()),
+          environment,
+          "standard",
+        );
       } catch {
         return transientFallback(cache, environment, {
           level: "warning",
@@ -118,18 +149,23 @@ export async function discoverModels(
         });
       }
     }
-    if ((response.status === 404 || response.status === 405) && config.officialHosted) {
+    if (
+      (response.status === 404 || response.status === 405) &&
+      config.officialHosted
+    ) {
       return managedFallback(config, cache, environment, fetcher);
     }
     if (response.status === 401 || response.status === 403) {
       return {
         models: environment,
         source: environment.length > 0 ? "environment" : "none",
-        diagnostics: [{
-          level: "error",
-          code: "discovery-auth",
-          message: `Otari model discovery returned HTTP ${response.status}; check OTARI_API_KEY and workspace access`,
-        }],
+        diagnostics: [
+          {
+            level: "error",
+            code: "discovery-auth",
+            message: `Otari model discovery returned HTTP ${response.status}; check OTARI_API_KEY and workspace access`,
+          },
+        ],
       };
     }
     return transientFallback(cache, environment, {

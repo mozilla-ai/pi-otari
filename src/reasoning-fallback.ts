@@ -1,14 +1,17 @@
 import {
-  createAssistantMessageEventStream,
   type Api,
   type AssistantMessage,
   type Context,
+  createAssistantMessageEventStream,
   type Model,
-  type SimpleStreamOptions,
   openAICompletionsApi,
+  type SimpleStreamOptions,
 } from "@earendil-works/pi-ai/compat";
 
-function errorMessage(model: Model<"openai-completions">, error: unknown): AssistantMessage {
+function errorMessage(
+  model: Model<"openai-completions">,
+  error: unknown,
+): AssistantMessage {
   return {
     role: "assistant",
     content: [],
@@ -39,7 +42,11 @@ export function streamOtari(
 
   (async () => {
     try {
-      const firstAttempt = openAICompletionsApi().streamSimple(openAIModel, context, options);
+      const firstAttempt = openAICompletionsApi().streamSimple(
+        openAIModel,
+        context,
+        options,
+      );
       let started = false;
       for await (const event of firstAttempt) {
         if (!started && event.type === "error") {
@@ -47,8 +54,13 @@ export function streamOtari(
             ...openAIModel,
             compat: { ...openAIModel.compat, supportsReasoningEffort: false },
           };
-          const fallbackAttempt = openAICompletionsApi().streamSimple(fallbackModel, context, options);
-          for await (const fallbackEvent of fallbackAttempt) stream.push(fallbackEvent);
+          const fallbackAttempt = openAICompletionsApi().streamSimple(
+            fallbackModel,
+            context,
+            options,
+          );
+          for await (const fallbackEvent of fallbackAttempt)
+            stream.push(fallbackEvent);
           stream.end();
           return;
         }
@@ -57,7 +69,11 @@ export function streamOtari(
       }
       stream.end();
     } catch (error) {
-      stream.push({ type: "error", reason: "error", error: errorMessage(openAIModel, error) });
+      stream.push({
+        type: "error",
+        reason: "error",
+        error: errorMessage(openAIModel, error),
+      });
       stream.end();
     }
   })();

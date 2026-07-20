@@ -1,31 +1,44 @@
 import { once } from "node:events";
 import { mkdtemp } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
-  SessionManager,
   type ExtensionAPI,
+  SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOtariExtension } from "../src/index.js";
 
-async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function body(
+  request: IncomingMessage,
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
+    string,
+    unknown
+  >;
 }
 
 function sse(response: ServerResponse, chunks: unknown[]): void {
   response.writeHead(200, { "content-type": "text/event-stream" });
-  for (const chunk of chunks) response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  for (const chunk of chunks)
+    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
   response.end("data: [DONE]\n\n");
 }
 
-function toolChunk(delta: Record<string, unknown>, finishReason: string | null = null) {
+function toolChunk(
+  delta: Record<string, unknown>,
+  finishReason: string | null = null,
+) {
   return {
     id: "chatcmpl-test",
     object: "chat.completion.chunk",
@@ -69,7 +82,8 @@ describe("Pi–Otari integration", () => {
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Expected TCP server");
+    if (!address || typeof address === "string")
+      throw new Error("Expected TCP server");
 
     vi.stubEnv("OTARI_API_KEY", "tk_integration");
     vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/v1`);
@@ -90,10 +104,14 @@ describe("Pi–Otari integration", () => {
     try {
       const model = session.modelRuntime.getModel("otari", "test-model");
       expect(model).toBeDefined();
-      await session.setModel(model!);
+      if (!model) throw new Error("Expected Otari model");
+      await session.setModel(model);
       await session.prompt("Reply with done.");
       expect(firstPayload?.reasoning_effort).toBe("high");
-      expect((firstPayload?.messages as Array<{ role: string }> | undefined)?.[0]?.role).toBe("system");
+      expect(
+        (firstPayload?.messages as Array<{ role: string }> | undefined)?.[0]
+          ?.role,
+      ).toBe("system");
       expect(secondPayload).not.toHaveProperty("reasoning_effort");
       expect(completionCount).toBe(2);
       expect(session.state.messages.at(-1)?.role).toBe("assistant");
@@ -121,12 +139,14 @@ describe("Pi–Otari integration", () => {
           sse(response, [
             toolChunk({
               role: "assistant",
-              tool_calls: [{
-                index: 0,
-                id: "call_1",
-                type: "function",
-                function: { name: "echo", arguments: "{\"text\":\"hello\"}" },
-              }],
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_1",
+                  type: "function",
+                  function: { name: "echo", arguments: '{"text":"hello"}' },
+                },
+              ],
             }),
             toolChunk({}, "tool_calls"),
           ]);
@@ -144,7 +164,8 @@ describe("Pi–Otari integration", () => {
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("Expected TCP server");
+    if (!address || typeof address === "string")
+      throw new Error("Expected TCP server");
 
     vi.stubEnv("OTARI_API_KEY", "tk_integration");
     vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/v1`);
@@ -155,15 +176,19 @@ describe("Pi–Otari integration", () => {
       agentDir,
       extensionFactories: [
         createOtariExtension({ agentDir: () => agentDir }),
-        (pi: ExtensionAPI) => pi.registerTool({
-          name: "echo",
-          label: "Echo",
-          description: "Return the supplied text",
-          parameters: Type.Object({ text: Type.String() }),
-          async execute(_id, params) {
-            return { content: [{ type: "text", text: params.text }], details: {} };
-          },
-        }),
+        (pi: ExtensionAPI) =>
+          pi.registerTool({
+            name: "echo",
+            label: "Echo",
+            description: "Return the supplied text",
+            parameters: Type.Object({ text: Type.String() }),
+            async execute(_id, params) {
+              return {
+                content: [{ type: "text", text: params.text }],
+                details: {},
+              };
+            },
+          }),
       ],
     });
     await resourceLoader.reload();
@@ -175,7 +200,8 @@ describe("Pi–Otari integration", () => {
     try {
       const model = session.modelRuntime.getModel("otari", "test-model");
       expect(model).toBeDefined();
-      await session.setModel(model!);
+      if (!model) throw new Error("Expected Otari model");
+      await session.setModel(model);
       await session.prompt("Use echo, then finish.");
       expect(completionCount).toBe(2);
       expect(session.state.messages.at(-1)?.role).toBe("assistant");

@@ -11,15 +11,17 @@ describe("model mapping", () => {
   it("parses OpenAI-compatible models and metadata", () => {
     const models = parseStandardModelList({
       object: "list",
-      data: [{
-        id: "anthropic:claude",
-        name: "Claude",
-        context_window: 200000,
-        max_output_tokens: 32000,
-        reasoning: true,
-        input_modalities: ["text", "image", "audio"],
-        pricing: { input_price_per_million: 3, output_price_per_million: 15 },
-      }],
+      data: [
+        {
+          id: "anthropic:claude",
+          name: "Claude",
+          context_window: 200000,
+          max_output_tokens: 32000,
+          reasoning: true,
+          input_modalities: ["text", "image", "audio"],
+          pricing: { input_price_per_million: 3, output_price_per_million: 15 },
+        },
+      ],
     });
     expect(models[0]).toMatchObject({
       id: "anthropic:claude",
@@ -34,19 +36,27 @@ describe("model mapping", () => {
   it("accepts a valid empty list and rejects malformed model lists", () => {
     expect(parseStandardModelList({ data: [] })).toEqual([]);
     expect(() => parseStandardModelList({ models: [] })).toThrow("data array");
-    expect(() => parseStandardModelList({ data: [{ object: "model" }] })).toThrow("valid model");
-    expect(() => parseManagedCatalog({ data: [{ provider: "mzai" }] })).toThrow("valid model");
+    expect(() =>
+      parseStandardModelList({ data: [{ object: "model" }] }),
+    ).toThrow("valid model");
+    expect(() => parseManagedCatalog({ data: [{ provider: "mzai" }] })).toThrow(
+      "valid model",
+    );
   });
 
   it("maps the hosted managed catalog", () => {
-    expect(parseManagedCatalog({
-      data: [{
-        provider: "mzai",
-        model: "org/model",
-        input_price_per_million: "0.5",
-        output_price_per_million: "2",
-      }],
-    })[0]).toMatchObject({
+    expect(
+      parseManagedCatalog({
+        data: [
+          {
+            provider: "mzai",
+            model: "org/model",
+            input_price_per_million: "0.5",
+            output_price_per_million: "2",
+          },
+        ],
+      })[0],
+    ).toMatchObject({
       id: "mzai:org/model",
       source: "managed-catalog",
       cost: { input: 0.5, output: 2 },
@@ -67,7 +77,9 @@ describe("model mapping", () => {
   });
 
   it("uses conservative Pi defaults", () => {
-    expect(toProviderModel({ id: "x:model", source: "environment" })).toMatchObject({
+    expect(
+      toProviderModel({ id: "x:model", source: "environment" }),
+    ).toMatchObject({
       id: "x:model",
       name: "x:model",
       reasoning: false,
