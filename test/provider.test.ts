@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { describe, expect, it, vi } from "vitest";
 import { registerOtariProvider } from "../src/provider.js";
 import type { OtariConfig } from "../src/types.js";
 
@@ -18,22 +18,33 @@ function fakePi(): ExtensionAPI {
 describe("registerOtariProvider", () => {
   it("registers OpenAI-compatible models using an environment reference", () => {
     const pi = fakePi();
-    expect(registerOtariProvider(pi, config, [{ id: "anthropic:claude", source: "standard" }])).toBe(true);
-    expect(pi.registerProvider).toHaveBeenCalledWith("otari", expect.objectContaining({
-      baseUrl: config.baseUrl,
-      api: "openai-completions",
-      apiKey: "$OTARI_API_KEY",
-      models: [expect.objectContaining({
-        id: "anthropic:claude",
-        reasoning: true,
-        thinkingLevelMap: expect.objectContaining({ medium: "high" }),
-        compat: {
-          maxTokensField: "max_tokens",
-          supportsDeveloperRole: false,
-        },
-      })],
-    }));
-    expect(JSON.stringify(vi.mocked(pi.registerProvider).mock.calls)).not.toContain(config.token);
+    expect(
+      registerOtariProvider(pi, config, [
+        { id: "anthropic:claude", source: "standard" },
+      ]),
+    ).toBe(true);
+    expect(pi.registerProvider).toHaveBeenCalledWith(
+      "otari",
+      expect.objectContaining({
+        baseUrl: config.baseUrl,
+        api: "openai-completions",
+        apiKey: "$OTARI_API_KEY",
+        models: [
+          expect.objectContaining({
+            id: "anthropic:claude",
+            reasoning: true,
+            thinkingLevelMap: expect.objectContaining({ medium: "high" }),
+            compat: {
+              maxTokensField: "max_tokens",
+              supportsDeveloperRole: false,
+            },
+          }),
+        ],
+      }),
+    );
+    expect(
+      JSON.stringify(vi.mocked(pi.registerProvider).mock.calls),
+    ).not.toContain(config.token);
   });
 
   it("does not register an empty provider", () => {

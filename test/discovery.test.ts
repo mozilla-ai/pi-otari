@@ -10,10 +10,11 @@ const base: OtariConfig = {
   officialHosted: true,
 };
 
-const response = (status: number, body: unknown): Response => new Response(JSON.stringify(body), {
-  status,
-  headers: { "content-type": "application/json" },
-});
+const response = (status: number, body: unknown): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 
 const cache: ModelCache = {
   schemaVersion: 1,
@@ -23,13 +24,23 @@ const cache: ModelCache = {
 
 describe("discoverModels", () => {
   it("uses standard discovery and sends bearer auth", async () => {
-    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer tk_secret");
-      expect(init?.redirect).toBe("error");
-      return response(200, { data: [{ id: "anthropic:claude" }] });
-    });
-    const result = await discoverModels(base, undefined, fetcher as typeof fetch);
-    expect(result.models.map((model) => model.id)).toEqual(["anthropic:claude"]);
+    const fetcher = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        expect(new Headers(init?.headers).get("authorization")).toBe(
+          "Bearer tk_secret",
+        );
+        expect(init?.redirect).toBe("error");
+        return response(200, { data: [{ id: "anthropic:claude" }] });
+      },
+    );
+    const result = await discoverModels(
+      base,
+      undefined,
+      fetcher as typeof fetch,
+    );
+    expect(result.models.map((model) => model.id)).toEqual([
+      "anthropic:claude",
+    ]);
     expect(result.source).toBe("standard");
   });
 
@@ -38,16 +49,22 @@ describe("discoverModels", () => {
       const target = String(url);
       return target === MANAGED_CATALOG_URL
         ? response(200, {
-            data: [{
-              provider: "mzai",
-              model: "org/model",
-              input_price_per_million: "1",
-              output_price_per_million: "2",
-            }],
+            data: [
+              {
+                provider: "mzai",
+                model: "org/model",
+                input_price_per_million: "1",
+                output_price_per_million: "2",
+              },
+            ],
           })
         : response(404, { detail: "Not Found" });
     });
-    const result = await discoverModels(base, undefined, fetcher as typeof fetch);
+    const result = await discoverModels(
+      base,
+      undefined,
+      fetcher as typeof fetch,
+    );
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(result.models[0].id).toBe("mzai:org/model");
     expect(result.source).toBe("managed-catalog");
@@ -61,22 +78,46 @@ describe("discoverModels", () => {
       fetcher as typeof fetch,
     );
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(result.models[0]).toMatchObject({ id: "cached:model", source: "stale-cache" });
+    expect(result.models[0]).toMatchObject({
+      id: "cached:model",
+      source: "stale-cache",
+    });
   });
 
-  it.each([401, 403])("does not hide auth status %s with stale cache", async (status) => {
-    const result = await discoverModels(base, cache, vi.fn(async () => response(status, {})) as typeof fetch);
-    expect(result.models).toEqual([]);
-    expect(result.diagnostics[0].code).toBe("discovery-auth");
-  });
+  it.each([401, 403])(
+    "does not hide auth status %s with stale cache",
+    async (status) => {
+      const result = await discoverModels(
+        base,
+        cache,
+        vi.fn(async () => response(status, {})) as typeof fetch,
+      );
+      expect(result.models).toEqual([]);
+      expect(result.diagnostics[0].code).toBe("discovery-auth");
+    },
+  );
 
-  it.each([429, 500])("uses stale cache for transient status %s", async (status) => {
-    const result = await discoverModels(base, cache, vi.fn(async () => response(status, {})) as typeof fetch);
-    expect(result.models[0]).toMatchObject({ id: "cached:model", source: "stale-cache" });
-  });
+  it.each([429, 500])(
+    "uses stale cache for transient status %s",
+    async (status) => {
+      const result = await discoverModels(
+        base,
+        cache,
+        vi.fn(async () => response(status, {})) as typeof fetch,
+      );
+      expect(result.models[0]).toMatchObject({
+        id: "cached:model",
+        source: "stale-cache",
+      });
+    },
+  );
 
   it("treats a valid empty 200 as authoritative", async () => {
-    const result = await discoverModels(base, cache, vi.fn(async () => response(200, { data: [] })) as typeof fetch);
+    const result = await discoverModels(
+      base,
+      cache,
+      vi.fn(async () => response(200, { data: [] })) as typeof fetch,
+    );
     expect(result.models).toEqual([]);
     expect(result.cacheUpdate).toEqual([]);
   });
@@ -85,9 +126,14 @@ describe("discoverModels", () => {
     const result = await discoverModels(
       base,
       cache,
-      vi.fn(async () => response(200, { data: [{ object: "model" }] })) as typeof fetch,
+      vi.fn(async () =>
+        response(200, { data: [{ object: "model" }] }),
+      ) as typeof fetch,
     );
-    expect(result.models[0]).toMatchObject({ id: "cached:model", source: "stale-cache" });
+    expect(result.models[0]).toMatchObject({
+      id: "cached:model",
+      source: "stale-cache",
+    });
     expect(result.diagnostics[0].code).toBe("discovery-invalid");
   });
 
@@ -97,14 +143,19 @@ describe("discoverModels", () => {
       cache,
       vi.fn(async () => response(200, { data: [] })) as typeof fetch,
     );
-    expect(result.models[0]).toMatchObject({ id: "anthropic:manual", source: "environment" });
+    expect(result.models[0]).toMatchObject({
+      id: "anthropic:manual",
+      source: "environment",
+    });
   });
 
   it("never includes the token in diagnostics", async () => {
     const result = await discoverModels(
       base,
       undefined,
-      vi.fn(async () => { throw new Error("network down"); }) as typeof fetch,
+      vi.fn(async () => {
+        throw new Error("network down");
+      }) as typeof fetch,
     );
     expect(JSON.stringify(result.diagnostics)).not.toContain("tk_secret");
   });

@@ -1,4 +1,8 @@
-export type ModelSource = "standard" | "managed-catalog" | "environment" | "stale-cache";
+export type ModelSource =
+  | "standard"
+  | "managed-catalog"
+  | "environment"
+  | "stale-cache";
 export type DiagnosticLevel = "warning" | "error";
 
 export interface Diagnostic {

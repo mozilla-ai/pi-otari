@@ -7,7 +7,8 @@ describe("loadOtariConfig", () => {
   it("uses hosted defaults and trims model selectors", () => {
     const config = loadOtariConfig({
       OTARI_API_KEY: "tk_test",
-      OTARI_MODELS: " anthropic:claude-sonnet-4-6, ,anthropic:claude-sonnet-4-6,mzai:model ",
+      OTARI_MODELS:
+        " anthropic:claude-sonnet-4-6, ,anthropic:claude-sonnet-4-6,mzai:model ",
     });
     expect(config).toMatchObject({
       baseUrl: hosted,
@@ -32,10 +33,14 @@ describe("loadOtariConfig", () => {
     "https://api.otari.ai/v1?workspace=other",
     "https://api.otari.ai/v1#fragment",
   ])("rejects unsafe URL %s", (baseUrl) => {
-    expect(() => loadOtariConfig({ OTARI_BASE_URL: baseUrl })).toThrow(ConfigError);
+    expect(() => loadOtariConfig({ OTARI_BASE_URL: baseUrl })).toThrow(
+      ConfigError,
+    );
   });
 
   it.each(["999", "30001", "not-a-number"])("rejects timeout %s", (value) => {
-    expect(() => loadOtariConfig({ OTARI_DISCOVERY_TIMEOUT_MS: value })).toThrow(ConfigError);
+    expect(() =>
+      loadOtariConfig({ OTARI_DISCOVERY_TIMEOUT_MS: value }),
+    ).toThrow(ConfigError);
   });
 });

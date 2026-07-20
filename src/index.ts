@@ -1,14 +1,14 @@
 import {
-  getAgentDir,
   type ExtensionAPI,
   type ExtensionFactory,
+  getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { readModelCache, writeModelCache } from "./cache.js";
 import { ConfigError, loadOtariConfig } from "./config.js";
 import { discoverModels } from "./discovery.js";
 import { registerOtariProvider } from "./provider.js";
 import { registerLifecycleUI } from "./status.js";
-import type { Diagnostic, RuntimeState } from "./types.js";
+import type { Diagnostic, OtariConfig, RuntimeState } from "./types.js";
 
 export interface ExtensionDependencies {
   env?: NodeJS.ProcessEnv;
@@ -16,7 +16,9 @@ export interface ExtensionDependencies {
   agentDir?: () => string;
 }
 
-export function createOtariExtension(dependencies: ExtensionDependencies = {}): ExtensionFactory {
+export function createOtariExtension(
+  dependencies: ExtensionDependencies = {},
+): ExtensionFactory {
   return async (pi: ExtensionAPI) => {
     let state: RuntimeState = {
       models: [],
@@ -25,21 +27,24 @@ export function createOtariExtension(dependencies: ExtensionDependencies = {}): 
     };
     registerLifecycleUI(pi, () => state);
 
-    let config;
+    let config: OtariConfig;
     try {
       config = loadOtariConfig(dependencies.env ?? process.env);
     } catch (error) {
-      const message = error instanceof ConfigError
-        ? error.message
-        : "Invalid Pi–Otari configuration";
+      const message =
+        error instanceof ConfigError
+          ? error.message
+          : "Invalid Pi–Otari configuration";
       state = {
         models: [],
         discoverySource: "none",
-        diagnostics: [{
-          level: "error",
-          code: "config-invalid",
-          message,
-        }],
+        diagnostics: [
+          {
+            level: "error",
+            code: "config-invalid",
+            message,
+          },
+        ],
       };
       return;
     }

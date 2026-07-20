@@ -1,9 +1,13 @@
 const token = process.env.OTARI_LIVE_TEST_TOKEN;
 const model = process.env.OTARI_LIVE_TEST_MODEL;
-const baseUrl = (process.env.OTARI_LIVE_TEST_BASE_URL ?? "https://api.otari.ai/v1").replace(/\/+$/, "");
+const baseUrl = (
+  process.env.OTARI_LIVE_TEST_BASE_URL ?? "https://api.otari.ai/v1"
+).replace(/\/+$/, "");
 
 if (!token || !model) {
-  throw new Error("Set OTARI_LIVE_TEST_TOKEN and OTARI_LIVE_TEST_MODEL to run the live smoke test");
+  throw new Error(
+    "Set OTARI_LIVE_TEST_TOKEN and OTARI_LIVE_TEST_MODEL to run the live smoke test",
+  );
 }
 
 const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -22,8 +26,9 @@ const response = await fetch(`${baseUrl}/chat/completions`, {
   signal: AbortSignal.timeout(30000),
 });
 
-if (!response.ok) throw new Error(`Live Otari request failed with HTTP ${response.status}`);
-const payload = await response.json() as {
+if (!response.ok)
+  throw new Error(`Live Otari request failed with HTTP ${response.status}`);
+const payload = (await response.json()) as {
   choices?: Array<{ message?: { content?: string } }>;
 };
 if (!payload.choices?.[0]?.message?.content) {
