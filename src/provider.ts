@@ -13,7 +13,10 @@ export function registerOtariProvider(
     baseUrl: config.baseUrl,
     apiKey: "$OTARI_API_KEY",
     api: "openai-completions",
-    models: models.map(toProviderModel),
+    models: models.map((model) => ({
+      ...toProviderModel(model),
+      compat: { maxTokensField: "max_tokens" },
+    })),
   });
   return true;
 }
