@@ -1,0 +1,43 @@
+{
+  "name": "pi-otari",
+  "version": "0.1.0",
+  "description": "Route Pi model requests through Otari with automatic model discovery",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "otari",
+    "llm-gateway"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "node --experimental-strip-types test/live-smoke.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@types/node": "^24.12.4",
+    "typebox": "^1.1.38",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.9"
+  }
+}

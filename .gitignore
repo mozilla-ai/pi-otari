@@ -1,0 +1,10 @@
+node_modules/
+docs/superpowers/
+.pi-subagents/
+coverage/
+dist/
+*.tgz
+.env
+.env.*
+!.env.example
+.DS_Store
