@@ -1,4 +1,8 @@
-# pi-otari
+<p align="center">
+  <a href="https://pi.dev"><img src="assets/pi-logo.svg" alt="Pi" height="66"></a>
+  <img src="assets/heart.svg" alt="loves" height="48">
+  <a href="https://otari.ai"><img src="assets/otari-logo.svg" alt="Otari" height="64"></a>
+</p>
 
 Route [Pi](https://pi.dev) model requests through [Otari](https://otari.ai) for usage tracking, budgets, traces, routing, and provider-key management.
 
