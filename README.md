@@ -9,7 +9,7 @@ Route [Pi](https://pi.dev) model requests through [Otari](https://otari.ai) for 
 ## Install
 
 ```bash
-pi install npm:pi-otari
+pi install npm:@mozilla-ai/pi-otari
 export OTARI_API_KEY=tk_example
 pi
 ```
