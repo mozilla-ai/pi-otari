@@ -46,7 +46,8 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/mozilla-ai/pi-otari/main/assets/gallery/otari-logo.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
