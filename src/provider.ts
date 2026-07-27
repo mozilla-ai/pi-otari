@@ -8,7 +8,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { discoverModels } from "./discovery.js";
 import { selectorsToModels, toProviderModel } from "./model-mapper.js";
 import { streamOtari } from "./stream-otari.js";
-import type { DiscoveryResult, OtariConfig, OtariModel } from "./types.js";
+import type { OtariConfig, OtariModel } from "./types.js";
 
 const THINKING_LEVEL_MAP = {
   minimal: "minimal",
@@ -39,7 +39,6 @@ function toRuntimeModel(
 
 export interface ProviderDependencies {
   fetch?: typeof fetch;
-  onDiscovery?: (result: DiscoveryResult) => void;
 }
 
 export function registerOtariProvider(
@@ -80,7 +79,6 @@ export function registerOtariProvider(
           },
           dependencies.fetch ?? fetch,
         );
-        dependencies.onDiscovery?.(result);
         return result.models.map((model) =>
           toRuntimeModel(model, config.baseUrl),
         );

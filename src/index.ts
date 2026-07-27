@@ -78,14 +78,6 @@ export function createOtariExtension(
     const { registerOtariProvider } = await import("./provider.js");
     registerOtariProvider(pi, config, [], {
       fetch: dependencies.fetch ?? fetch,
-      onDiscovery(discovery) {
-        state = {
-          config,
-          models: discovery.models,
-          diagnostics: discovery.diagnostics,
-          discoverySource: discovery.source,
-        };
-      },
     });
     state = { ...state, config };
   };

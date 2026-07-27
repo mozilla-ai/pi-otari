@@ -14,11 +14,22 @@ function harness(state: RuntimeState) {
   return { handlers };
 }
 
-function context(model?: { provider: string; id: string }) {
+function context(options?: {
+  model?: { provider: string; id: string };
+  auth?: unknown;
+  authError?: Error;
+}) {
   return {
-    model,
+    model: options?.model,
     hasUI: true,
     ui: { notify: vi.fn(), setStatus: vi.fn() },
+    modelRegistry: {
+      getProviderAuth: vi.fn(async () => {
+        if (options?.authError) throw options.authError;
+        // Default: a configured credential unless a test opts into "unconfigured".
+        return "auth" in (options ?? {}) ? options?.auth : { auth: {} };
+      }),
+    },
   };
 }
 
@@ -45,7 +56,22 @@ describe("lifecycle UI", () => {
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("pi-otari", undefined);
   });
 
-  it("does not infer missing models before native provider refresh", async () => {
+  it("prompts for login when no Otari credentials are configured", async () => {
+    const { handlers } = harness({
+      models: [],
+      diagnostics: [],
+      discoverySource: "none",
+    });
+    const ctx = context({ auth: undefined });
+    await handlers.get("session_start")?.({ reason: "startup" }, ctx);
+    expect(ctx.modelRegistry.getProviderAuth).toHaveBeenCalledWith("otari");
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("/login otari"),
+      "warning",
+    );
+  });
+
+  it("stays quiet when a credential is already configured", async () => {
     const { handlers } = harness({
       models: [],
       diagnostics: [],
@@ -56,13 +82,39 @@ describe("lifecycle UI", () => {
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
+  it("does not nag when the credential check fails transiently", async () => {
+    const { handlers } = harness({
+      models: [],
+      diagnostics: [],
+      discoverySource: "none",
+    });
+    const ctx = context({ authError: new Error("store unavailable") });
+    await handlers.get("session_start")?.({ reason: "startup" }, ctx);
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a configuration error and skips the login prompt", async () => {
+    const { handlers } = harness({
+      models: [],
+      diagnostics: [
+        { level: "error", code: "config-invalid", message: "bad base url" },
+      ],
+      discoverySource: "none",
+    });
+    const ctx = context({ auth: undefined });
+    await handlers.get("session_start")?.({ reason: "startup" }, ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith("bad base url", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+    expect(ctx.modelRegistry.getProviderAuth).not.toHaveBeenCalled();
+  });
+
   it("does not show a success notification", async () => {
     const { handlers } = harness({
       models: [{ id: "mzai:model", source: "managed-catalog" }],
       diagnostics: [],
       discoverySource: "managed-catalog",
     });
-    const ctx = context({ provider: "otari", id: "mzai:model" });
+    const ctx = context({ model: { provider: "otari", id: "mzai:model" } });
     await handlers.get("session_start")?.({ reason: "startup" }, ctx);
     expect(ctx.ui.notify).not.toHaveBeenCalled();
     expect(ctx.ui.setStatus).toHaveBeenCalledWith(
