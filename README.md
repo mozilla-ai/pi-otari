@@ -78,6 +78,12 @@ export OTARI_MODELS="anthropic:claude-sonnet-5,mzai:moonshotai/Kimi-K3"
 
 These selectors are unverified until the first request. Otari must have the corresponding provider and model enabled for the workspace.
 
+## Reasoning levels
+
+Otari models expose Pi's `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning levels. The extension forwards the selected level unchanged. Pi's default remains `medium` unless the user configures or selects another level.
+
+Until Otari discovery provides per-model reasoning capabilities, these levels are optimistic: an upstream model may reject a level it does not support. The extension preserves that error without silently retrying at a different level or without reasoning. When the upstream error reports supported values, they appear in Pi's error message.
+
 ## Self-hosted Otari
 
 ```bash

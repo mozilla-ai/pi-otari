@@ -32,6 +32,18 @@ function errorMessage(
   };
 }
 
+function describeReasoningRejection(
+  model: Model<"openai-completions">,
+  level: NonNullable<SimpleStreamOptions["reasoning"]>,
+  message: string,
+): string {
+  return [
+    `Otari model "${model.id}" rejected reasoning level "${level}".`,
+    "Otari does not currently expose this model's supported reasoning levels. Try another level or disable reasoning.",
+    message,
+  ].join("\n\n");
+}
+
 export function streamOtari(
   model: Model<Api>,
   context: Context,
@@ -42,30 +54,33 @@ export function streamOtari(
 
   (async () => {
     try {
-      const firstAttempt = openAICompletionsApi().streamSimple(
+      const attempt = openAICompletionsApi().streamSimple(
         openAIModel,
         context,
         options,
       );
-      let started = false;
-      for await (const event of firstAttempt) {
-        if (!started && event.type === "error") {
-          const fallbackModel: Model<"openai-completions"> = {
-            ...openAIModel,
-            compat: { ...openAIModel.compat, supportsReasoningEffort: false },
-          };
-          const fallbackAttempt = openAICompletionsApi().streamSimple(
-            fallbackModel,
-            context,
-            options,
-          );
-          for await (const fallbackEvent of fallbackAttempt)
-            stream.push(fallbackEvent);
-          stream.end();
-          return;
+      for await (const event of attempt) {
+        if (
+          event.type === "error" &&
+          options?.reasoning &&
+          /reasoning[_\s-]?effort|reasoning level|thinking level/i.test(
+            event.error.errorMessage ?? "",
+          )
+        ) {
+          stream.push({
+            ...event,
+            error: {
+              ...event.error,
+              errorMessage: describeReasoningRejection(
+                openAIModel,
+                options.reasoning,
+                event.error.errorMessage ?? "Unknown Otari error",
+              ),
+            },
+          });
+        } else {
+          stream.push(event);
         }
-        if (event.type === "start") started = true;
-        stream.push(event);
       }
       stream.end();
     } catch (error) {

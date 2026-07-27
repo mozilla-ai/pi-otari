@@ -51,10 +51,9 @@ function toolChunk(
 describe("Pi–Otari integration", () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  it("retries without reasoning effort when Otari fails before streaming", async () => {
+  it("preserves the selected reasoning level and reports a rejected level without retrying", async () => {
     let completionCount = 0;
-    let firstPayload: Record<string, unknown> | undefined;
-    let secondPayload: Record<string, unknown> | undefined;
+    let completionPayload: Record<string, unknown> | undefined;
     const server = createServer(async (request, response) => {
       if (request.method === "GET" && request.url === "/v1/models") {
         response.writeHead(200, { "content-type": "application/json" });
@@ -63,18 +62,17 @@ describe("Pi–Otari integration", () => {
       }
       if (request.method === "POST" && request.url === "/v1/chat/completions") {
         completionCount += 1;
-        const payload = await body(request);
-        if (completionCount === 1) {
-          firstPayload = payload;
-          response.writeHead(502);
-          response.end();
-          return;
-        }
-        secondPayload = payload;
-        sse(response, [
-          toolChunk({ role: "assistant", content: "done" }),
-          toolChunk({}, "stop"),
-        ]);
+        completionPayload = await body(request);
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            error: {
+              message:
+                "reasoning_effort 'medium' is unsupported; available values: low, high",
+              type: "invalid_request_error",
+            },
+          }),
+        );
         return;
       }
       response.writeHead(404).end();
@@ -107,14 +105,25 @@ describe("Pi–Otari integration", () => {
       if (!model) throw new Error("Expected Otari model");
       await session.setModel(model);
       await session.prompt("Reply with done.");
-      expect(firstPayload?.reasoning_effort).toBe("high");
+
+      expect(completionPayload?.reasoning_effort).toBe("medium");
       expect(
-        (firstPayload?.messages as Array<{ role: string }> | undefined)?.[0]
-          ?.role,
+        (
+          completionPayload?.messages as Array<{ role: string }> | undefined
+        )?.[0]?.role,
       ).toBe("system");
-      expect(secondPayload).not.toHaveProperty("reasoning_effort");
-      expect(completionCount).toBe(2);
-      expect(session.state.messages.at(-1)?.role).toBe("assistant");
+      expect(completionCount).toBe(1);
+      expect(session.state.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: expect.stringContaining(
+          'Otari model "test-model" rejected reasoning level "medium".',
+        ),
+      });
+      expect(
+        (session.state.messages.at(-1) as { errorMessage?: string })
+          .errorMessage,
+      ).toContain("available values: low, high");
     } finally {
       session.dispose();
       server.close();

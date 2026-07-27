@@ -1,15 +1,15 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { toProviderModel } from "./model-mapper.js";
-import { streamOtari } from "./reasoning-fallback.js";
+import { streamOtari } from "./stream-otari.js";
 import type { OtariConfig, OtariModel } from "./types.js";
 
-const HIGH_THINKING_LEVEL_MAP = {
-  minimal: "high",
-  low: "high",
-  medium: "high",
+const THINKING_LEVEL_MAP = {
+  minimal: "minimal",
+  low: "low",
+  medium: "medium",
   high: "high",
-  xhigh: "high",
-  max: "high",
+  xhigh: "xhigh",
+  max: "max",
 } as const;
 
 export function registerOtariProvider(
@@ -27,7 +27,7 @@ export function registerOtariProvider(
     models: models.map((model) => ({
       ...toProviderModel(model),
       reasoning: true,
-      thinkingLevelMap: HIGH_THINKING_LEVEL_MAP,
+      thinkingLevelMap: THINKING_LEVEL_MAP,
       compat: {
         maxTokensField: "max_tokens",
         supportsDeveloperRole: false,
