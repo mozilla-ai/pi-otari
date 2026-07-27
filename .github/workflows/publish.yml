@@ -8,12 +8,11 @@ permissions:
   contents: read
 
 jobs:
-  publish:
-    name: Publish package
+  build:
+    name: Build release artifact
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -23,13 +22,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          registry-url: https://registry.npmjs.org
 
-      - name: Install trusted-publishing-compatible npm
-        run: npm install --global "npm@^11.5.1"
-
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
 
       - name: Validate package
         run: npm run check
@@ -43,13 +38,100 @@ jobs:
             exit 1
           fi
 
-      - name: Publish package
-        env:
-          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+      - name: Verify build did not modify the checkout
         shell: bash
         run: |
+          set -euo pipefail
+          changes="$(git status --porcelain --untracked-files=all)"
+          if [[ -n "$changes" ]]; then
+            echo "Build modified the release checkout:" >&2
+            echo "$changes" >&2
+            exit 1
+          fi
+
+      - name: Create immutable package artifact from committed source
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="$RUNNER_TEMP/package-source"
+          mkdir -p "$package_dir"
+          git archive "$GITHUB_SHA" | tar -x -C "$package_dir"
+          cd "$package_dir"
+          npm pack --ignore-scripts --json > npm-pack.json
+          package_file="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const result = JSON.parse(readFileSync("npm-pack.json", "utf8"));
+            if (result.length !== 1 || typeof result[0]?.filename !== "string") {
+              throw new Error("npm pack did not produce exactly one package");
+            }
+            process.stdout.write(result[0].filename);
+          ')"
+          sha256sum "$package_file" > "$package_file.sha256"
+          echo "package_path=$package_dir/$package_file" >> "$GITHUB_OUTPUT"
+          echo "checksum_path=$package_dir/$package_file.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: |
+            ${{ steps.package.outputs.package_path }}
+            ${{ steps.package.outputs.checksum_path }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish package
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install pinned trusted-publishing-compatible npm
+        run: npm install --global "npm@11.11.0" --ignore-scripts
+
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: release-artifact
+
+      - name: Verify release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-artifact
+          sha256sum --check --strict ./*.tgz.sha256
+          shopt -s nullglob
+          packages=(./*.tgz)
+          if (( ${#packages[@]} != 1 )); then
+            echo "Expected exactly one npm package artifact" >&2
+            exit 1
+          fi
+
+      - name: Publish verified artifact
+        env:
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+          NPM_CONFIG_PROVENANCE: "true"
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(release-artifact/*.tgz)
+          if (( ${#packages[@]} != 1 )); then
+            echo "Expected exactly one npm package artifact" >&2
+            exit 1
+          fi
           if [[ "$IS_PRERELEASE" == "true" ]]; then
-            npm publish --tag next
+            npm publish "${packages[0]}" --ignore-scripts --tag next
           else
-            npm publish
+            npm publish "${packages[0]}" --ignore-scripts
           fi
