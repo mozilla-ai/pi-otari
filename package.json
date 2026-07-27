@@ -1,6 +1,6 @@
 {
   "name": "@mozilla-ai/pi-otari",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Route Pi model requests through Otari with automatic model discovery",
   "type": "module",
   "license": "Apache-2.0",
