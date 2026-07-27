@@ -104,38 +104,9 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 - **Stale list:** run `/reload`; discovery runs on every extension load.
 - **Local cost differs from Otari:** Otari is authoritative when discovery metadata is incomplete.
 
-## Development
+## Contributing
 
-Install the locked dependency versions and run all validation:
-
-```bash
-npm ci
-npm run check
-```
-
-Load the local extension in Pi:
-
-```bash
-OTARI_API_KEY=tk_example pi -e ./src/index.ts
-```
-
-If the npm package is already installed, disable it temporarily with `pi config` while testing the local extension so Pi does not load both copies. Use `npm install` instead of `npm ci` only when intentionally changing dependencies or updating `package-lock.json`.
-
-## Releasing
-
-Releases are published to npm through GitHub Actions and npm trusted publishing:
-
-1. Update `package.json` and `package-lock.json` together:
-
-   ```bash
-   npm version <version> --no-git-tag-version
-   ```
-
-2. Open and merge the version PR after CI passes.
-3. Publish a GitHub Release whose tag exactly matches `v<version>`.
-4. Verify the `Publish to npm` workflow and the package version on npm.
-
-Stable releases publish with the npm tag `latest`; GitHub prereleases publish with `next`. Do not run `npm publish` manually for normal releases.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development, testing, dependency updates, and release instructions.
 
 ## License
 
