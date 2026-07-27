@@ -4,19 +4,67 @@
   <a href="https://otari.ai"><img src="assets/otari-logo.svg" alt="Otari" height="64"></a>
 </p>
 
-Route [Pi](https://pi.dev) model requests through [Otari](https://otari.ai) for usage tracking, budgets, traces, routing, and provider-key management.
+<p align="center">
+  <a href="https://www.npmjs.com/package/@mozilla-ai/pi-otari"><img src="https://img.shields.io/npm/v/%40mozilla-ai%2Fpi-otari" alt="npm version"></a>
+  <a href="https://github.com/mozilla-ai/pi-otari/actions/workflows/ci.yml"><img src="https://github.com/mozilla-ai/pi-otari/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+</p>
 
-## Install
+[Pi](https://pi.dev) is a minimal, extensible terminal coding harness, while [Otari](https://otari.ai) is an AI control plane and gateway for routing model requests, managing provider credentials, and tracking usage, budgets, and traces. This extension connects them so Pi can use Otari-managed models.
+
+## Requirements
+
+- [Pi](https://pi.dev) installed and available as `pi`
+- Node.js 22.19.0 or newer
+- An Otari workspace API key
+- At least one upstream provider and model enabled in your Otari workspace
+
+## Install and use
+
+1. Install the extension from npm:
+
+   ```bash
+   pi install npm:@mozilla-ai/pi-otari
+   ```
+
+2. Export your Otari workspace API key in the shell where you run Pi:
+
+   ```bash
+   export OTARI_API_KEY=tk_example
+   ```
+
+   Keep the key out of source control. Use your shell's secure configuration or a secret manager if you want it available in future terminal sessions.
+
+3. Start Pi:
+
+   ```bash
+   pi
+   ```
+
+4. Make Otari models available in Pi:
+
+   - Run `/scoped-models`.
+   - Search for `otari`.
+   - Enable the models you want to use.
+   - Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to save the scope.
+
+5. Run `/model` and select one of the enabled `otari` models.
+
+6. Send a prompt normally. No Otari-specific slash command is required. When an Otari model is selected, Pi's status area shows `Otari → <model-id>`.
+
+Pi sends requests for the selected provider to `https://api.otari.ai/v1/chat/completions`. Local Pi tools continue to run according to your Pi configuration.
+
+To inspect the Otari models available to Pi from a shell, run:
 
 ```bash
-pi install npm:@mozilla-ai/pi-otari
-export OTARI_API_KEY=tk_example
-pi
+pi --list-models otari
 ```
 
-> **Note:** Otari models do not appear in `/model` until you run `/scoped-models`, search for `otari`, enable the models you want, and press Ctrl+S to save the scope.
+### Update or remove
 
-Then open Pi's built-in `/model` selector and choose one of the enabled Otari models. No Otari-specific slash command is required. Pi sends requests for that selected provider to `https://api.otari.ai/v1/chat/completions`; local Pi tools continue to run according to your Pi configuration.
+```bash
+pi update npm:@mozilla-ai/pi-otari
+pi remove npm:@mozilla-ai/pi-otari
+```
 
 ## Model discovery
 
@@ -25,7 +73,7 @@ On startup and `/reload`, the extension tries `GET ${OTARI_BASE_URL}/models`. St
 If no models are found, provide one or more Otari selectors and reload:
 
 ```bash
-export OTARI_MODELS="anthropic:claude-sonnet-4-6,mzai:moonshotai/Kimi-K2.6"
+export OTARI_MODELS="anthropic:claude-sonnet-5,mzai:moonshotai/Kimi-K3"
 ```
 
 These selectors are unverified until the first request. Otari must have the corresponding provider and model enabled for the workspace.
@@ -55,20 +103,14 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 
 ## Troubleshooting
 
-- **No Otari models in `/model`:** set `OTARI_MODELS`, then run `/reload`.
+- **No Otari models in `/model`:** run `/scoped-models`, search for `otari`, enable models, and press <kbd>Ctrl</kbd>+<kbd>S</kbd>. If no models are available there, set `OTARI_MODELS` and run `/reload`.
 - **401/403:** regenerate or re-export `OTARI_API_KEY` and confirm workspace access.
-- **Unknown model:** use an Otari selector enabled for the workspace.
+- **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, or select a different Otari model in Pi.
 - **Model returns 404 "not found on the provider":** the hosted managed catalog lists priced models that may not all be deployed. Pick another model.
-- **Stale list:** run `/reload`; discovery runs on every extension load.
-- **Local cost differs from Otari:** Otari is authoritative when discovery metadata is incomplete.
 
-## Development
+## Contributing
 
-```bash
-npm install
-npm run check
-pi -e ./src/index.ts
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development, testing, dependency updates, and release instructions.
 
 ## License
 
