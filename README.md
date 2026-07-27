@@ -99,10 +99,9 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 
 - **No Otari models in `/model`:** run `/scoped-models`, search for `otari`, enable models, and press <kbd>Ctrl</kbd>+<kbd>S</kbd>. If no models are available there, set `OTARI_MODELS` and run `/reload`.
 - **401/403:** regenerate or re-export `OTARI_API_KEY` and confirm workspace access.
-- **Unknown model:** use an Otari selector enabled for the workspace.
+- **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, or select a different Otari model in Pi.
 - **Model returns 404 "not found on the provider":** the hosted managed catalog lists priced models that may not all be deployed. Pick another model.
-- **Stale list:** run `/reload`; discovery runs on every extension load.
-- **Local cost differs from Otari:** Otari is authoritative when discovery metadata is incomplete.
+- **Model list is out of date:** run `/reload` to reload the extension and refresh model discovery, then reopen `/scoped-models` or `/model`.
 
 ## Contributing
 
