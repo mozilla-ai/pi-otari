@@ -33,7 +33,14 @@ describe("registerOtariProvider", () => {
           expect.objectContaining({
             id: "anthropic:claude",
             reasoning: true,
-            thinkingLevelMap: expect.objectContaining({ medium: "high" }),
+            thinkingLevelMap: {
+              minimal: "minimal",
+              low: "low",
+              medium: "medium",
+              high: "high",
+              xhigh: "xhigh",
+              max: "max",
+            },
             compat: {
               maxTokensField: "max_tokens",
               supportsDeveloperRole: false,
