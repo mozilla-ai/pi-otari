@@ -45,7 +45,7 @@ describe("lifecycle UI", () => {
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith("pi-otari", undefined);
   });
 
-  it("notifies once when no models are available", async () => {
+  it("does not infer missing models before native provider refresh", async () => {
     const { handlers } = harness({
       models: [],
       diagnostics: [],
@@ -53,10 +53,7 @@ describe("lifecycle UI", () => {
     });
     const ctx = context();
     await handlers.get("session_start")?.({ reason: "startup" }, ctx);
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("OTARI_MODELS"),
-      "warning",
-    );
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
   it("does not show a success notification", async () => {

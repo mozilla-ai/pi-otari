@@ -4,7 +4,7 @@
 
 - Node.js 22.19.0 or newer
 - npm
-- [Pi](https://pi.dev) installed and available as `pi`
+- [Pi](https://pi.dev) 0.81.0 or newer, installed and available as `pi`
 - An Otari API key for local integration testing
 
 ## Set up the repository
@@ -15,7 +15,7 @@ cd pi-otari
 npm ci
 ```
 
-`npm ci` installs the exact dependency versions recorded in `package-lock.json`. Use `npm install` only when intentionally changing dependencies or updating the lockfile.
+`npm ci` installs the exact dependency versions recorded in `package-lock.json`. Use `npm install` only when intentionally changing dependencies or updating the lockfile. Pi core packages stay pinned in `devDependencies` for tests but must use `"*"` in `peerDependencies`; host-version compatibility is enforced by the extension's runtime check.
 
 ## Validate changes
 
@@ -30,6 +30,12 @@ This checks formatting, lint rules, TypeScript types, and the test suite.
 ## Test the extension locally
 
 Load the extension directly from the repository:
+
+```bash
+pi -e ./src/index.ts
+```
+
+Then run `/login otari` and enter a disposable test key in Pi's secret authentication prompt. The prompt is separate from chat; never paste a credential into a normal conversation message. For deterministic noninteractive testing, continue to use:
 
 ```bash
 OTARI_API_KEY=tk_example pi -e ./src/index.ts

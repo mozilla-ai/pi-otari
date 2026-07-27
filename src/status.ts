@@ -33,15 +33,6 @@ export function registerLifecycleUI(
       ctx.ui.notify(error.message, "error");
       return;
     }
-    if (state.models.length === 0) {
-      ctx.ui.notify(
-        "Pi–Otari found no available models.\n" +
-          "Set OTARI_MODELS to one or more Otari selectors, then run /reload.\n" +
-          'Example: OTARI_MODELS="anthropic:claude-sonnet-4-6"',
-        "warning",
-      );
-      return;
-    }
     const warning = state.diagnostics.find((item) => item.level === "warning");
     if (warning) ctx.ui.notify(warning.message, "warning");
   });

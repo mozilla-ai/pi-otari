@@ -90,16 +90,18 @@ describe("Pi–Otari integration", () => {
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir,
-      extensionFactories: [createOtariExtension({ agentDir: () => agentDir })],
+      extensionFactories: [createOtariExtension()],
     });
     await resourceLoader.reload();
     const { session } = await createAgentSession({
       cwd,
+      agentDir,
       resourceLoader,
       sessionManager: SessionManager.inMemory(cwd),
       thinkingLevel: "medium",
     });
     try {
+      await session.modelRuntime.refresh({ allowNetwork: true });
       const model = session.modelRuntime.getModel("otari", "test-model");
       expect(model).toBeDefined();
       if (!model) throw new Error("Expected Otari model");
@@ -184,7 +186,7 @@ describe("Pi–Otari integration", () => {
       cwd,
       agentDir,
       extensionFactories: [
-        createOtariExtension({ agentDir: () => agentDir }),
+        createOtariExtension(),
         (pi: ExtensionAPI) =>
           pi.registerTool({
             name: "echo",
@@ -203,10 +205,12 @@ describe("Pi–Otari integration", () => {
     await resourceLoader.reload();
     const { session } = await createAgentSession({
       cwd,
+      agentDir,
       resourceLoader,
       sessionManager: SessionManager.inMemory(cwd),
     });
     try {
+      await session.modelRuntime.refresh({ allowNetwork: true });
       const model = session.modelRuntime.getModel("otari", "test-model");
       expect(model).toBeDefined();
       if (!model) throw new Error("Expected Otari model");
@@ -215,6 +219,115 @@ describe("Pi–Otari integration", () => {
       expect(completionCount).toBe(2);
       expect(session.state.messages.at(-1)?.role).toBe("assistant");
     } finally {
+      session.dispose();
+      server.close();
+      await once(server, "close");
+    }
+  });
+
+  it("stores an API key through login without adding it to model context", async () => {
+    let discoveryCount = 0;
+    let completionCount = 0;
+    const server = createServer(async (request, response) => {
+      expect(request.headers.authorization).toBe("Bearer tk_login_integration");
+      if (request.method === "GET" && request.url === "/v1/models") {
+        discoveryCount += 1;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "mzai:test-model" }] }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/v1/chat/completions") {
+        completionCount += 1;
+        sse(response, [
+          toolChunk({ role: "assistant", content: "done" }),
+          toolChunk({}, "stop"),
+        ]);
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Expected TCP server");
+
+    vi.stubEnv("OTARI_API_KEY", "");
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/v1`);
+    const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-login-"));
+    const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      extensionFactories: [createOtariExtension()],
+    });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({
+      cwd,
+      agentDir,
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+    let resumedSession:
+      | Awaited<ReturnType<typeof createAgentSession>>["session"]
+      | undefined;
+
+    try {
+      await session.modelRuntime.login("otari", "api_key", {
+        prompt: async () => "tk_login_integration",
+        notify: () => {},
+      });
+      expect(discoveryCount).toBeGreaterThan(0);
+      expect(JSON.stringify(session.state.messages)).not.toContain(
+        "tk_login_integration",
+      );
+
+      const model = session.modelRuntime.getModel("otari", "mzai:test-model");
+      expect(model).toBeDefined();
+      if (!model) throw new Error("Expected Otari model after login");
+      await session.setModel(model);
+      await session.prompt("Reply with done.");
+
+      expect(completionCount).toBe(1);
+      expect(JSON.stringify(session.state.messages)).not.toContain(
+        "tk_login_integration",
+      );
+
+      const resumedLoader = new DefaultResourceLoader({
+        cwd,
+        agentDir,
+        extensionFactories: [createOtariExtension()],
+      });
+      await resumedLoader.reload();
+      resumedSession = (
+        await createAgentSession({
+          cwd,
+          agentDir,
+          resourceLoader: resumedLoader,
+          sessionManager: SessionManager.inMemory(cwd),
+        })
+      ).session;
+      await resumedSession.modelRuntime.refresh({ allowNetwork: false });
+      expect(await resumedSession.modelRuntime.getAuth("otari")).toMatchObject({
+        auth: { apiKey: "tk_login_integration" },
+        source: "stored credential",
+      });
+      const resumedModel = resumedSession.modelRuntime.getModel(
+        "otari",
+        "mzai:test-model",
+      );
+      expect(resumedModel).toBeDefined();
+      if (!resumedModel) throw new Error("Expected persisted Otari model");
+      await resumedSession.setModel(resumedModel);
+      await resumedSession.prompt("Reply with done again.");
+      expect(completionCount).toBe(2);
+
+      await resumedSession.modelRuntime.logout("otari");
+      expect(
+        await resumedSession.modelRuntime.getAuth("otari"),
+      ).toBeUndefined();
+    } finally {
+      resumedSession?.dispose();
       session.dispose();
       server.close();
       await once(server, "close");

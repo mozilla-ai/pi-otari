@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  mergeModels,
   parseManagedCatalog,
   parseStandardModelList,
-  selectorsToModels,
   toProviderModel,
 } from "../src/model-mapper.js";
 
@@ -61,19 +59,6 @@ describe("model mapping", () => {
       source: "managed-catalog",
       cost: { input: 0.5, output: 2 },
     });
-  });
-
-  it("keeps rich remote metadata over environment and stale cache", () => {
-    const merged = mergeModels(
-      [{ id: "x:model", name: "stale", source: "stale-cache" }],
-      selectorsToModels(["x:model", "y:model"]),
-      [],
-      [{ id: "x:model", name: "remote", source: "standard" }],
-    );
-    expect(merged.map((model) => [model.id, model.name])).toEqual([
-      ["x:model", "remote"],
-      ["y:model", "y:model"],
-    ]);
   });
 
   it("uses conservative Pi defaults", () => {
