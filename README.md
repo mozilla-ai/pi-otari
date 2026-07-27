@@ -81,7 +81,7 @@ Otari models expose Pi's `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` 
 
 Until Otari discovery provides per-model reasoning capabilities, these levels are optimistic: an upstream model may reject a level it does not support. The extension preserves that error without silently retrying at a different level or without reasoning. When the upstream error reports supported values, they appear in Pi's error message.
 
-## Noninteractive authentication
+## Non-interactive authentication
 
 For CI, containers, and other noninteractive environments, provide the API key through `OTARI_API_KEY`:
 
