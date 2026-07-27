@@ -67,7 +67,7 @@ On startup and `/reload`, the extension tries `GET ${OTARI_BASE_URL}/models`. St
 If no models are found, provide one or more Otari selectors and reload:
 
 ```bash
-export OTARI_MODELS="anthropic:claude-sonnet-4-6,mzai:moonshotai/Kimi-K2.6"
+export OTARI_MODELS="anthropic:claude-sonnet-5,mzai:moonshotai/Kimi-K3"
 ```
 
 These selectors are unverified until the first request. Otari must have the corresponding provider and model enabled for the workspace.
