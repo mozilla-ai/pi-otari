@@ -66,10 +66,11 @@ pi remove npm:@mozilla-ai/pi-otari
 
 After login and during provider refresh, the extension tries `GET ${OTARI_BASE_URL}/models`. Standalone and self-hosted Otari support this now. Hosted Otari currently falls back to its public managed `mzai` catalog and will automatically use workspace-scoped `/models` when that endpoint becomes available.
 
-If no models are found, provide one or more Otari selectors and reload:
+If no models are found, provide one or more Otari selectors before starting or restarting Pi:
 
 ```bash
 export OTARI_MODELS="anthropic:claude-sonnet-5,mzai:moonshotai/Kimi-K3"
+pi
 ```
 
 These selectors are unverified until the first request. Otari must have the corresponding provider and model enabled for the workspace.
@@ -80,15 +81,15 @@ Otari models expose Pi's `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` 
 
 Until Otari discovery provides per-model reasoning capabilities, these levels are optimistic: an upstream model may reject a level it does not support. The extension preserves that error without silently retrying at a different level or without reasoning. When the upstream error reports supported values, they appear in Pi's error message.
 
-## Environment-based authentication
+## Noninteractive authentication
 
-`OTARI_API_KEY` remains supported for CI, containers, and other ephemeral environments:
+For CI, containers, and other noninteractive environments, provide the API key through `OTARI_API_KEY`:
 
 ```bash
 OTARI_API_KEY=tk_example pi
 ```
 
-A key stored through `/login otari` takes precedence over `OTARI_API_KEY`.
+A key stored through `/login otari` takes precedence over `OTARI_API_KEY`. Running `/logout otari` removes the stored key, but Pi will continue using `OTARI_API_KEY` if it is set.
 
 ## Self-hosted Otari
 
@@ -117,9 +118,9 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 ## Troubleshooting
 
 - **“pi-otari requires Pi 0.81.0 or newer”:** run `pi update`, then restart Pi. The package uses wildcard Pi peer dependencies, as required for Pi packages, and checks host compatibility at runtime instead of installing a second copy of Pi.
-- **No Otari models in `/model`:** run `/scoped-models`, search for `otari`, enable models, and press <kbd>Ctrl</kbd>+<kbd>S</kbd>. If no models are available there, set `OTARI_MODELS` and run `/reload`.
-- **Missing credentials:** run `/login otari`, or set `OTARI_API_KEY` and run `/reload`.
-- **401/403:** run `/login otari` with a valid replacement key (or update `OTARI_API_KEY` when no stored credential exists) and confirm workspace access.
+- **No Otari models in `/model`:** run `/scoped-models`, search for `otari`, enable models, and press <kbd>Ctrl</kbd>+<kbd>S</kbd>. If no models are available there, set `OTARI_MODELS` before starting or restarting Pi.
+- **Missing credentials:** run `/login otari`, or set `OTARI_API_KEY` before starting or restarting Pi.
+- **401/403:** run `/login otari` with a valid replacement key, or update `OTARI_API_KEY` when no stored credential exists and restart Pi; then confirm workspace access.
 - **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, or select a different Otari model in Pi.
 - **Model returns 404 "not found on the provider":** the hosted managed catalog lists priced models that may not all be deployed. Pick another model.
 
