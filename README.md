@@ -11,6 +11,10 @@
 
 [Pi](https://pi.dev) is a minimal, extensible terminal coding harness, while [Otari](https://otari.ai) is an AI control plane and gateway for routing model requests, managing provider credentials, and tracking usage, budgets, and traces. This extension connects them so Pi can use Otari-managed models.
 
+## Demo
+
+![Pi Otari extension demo](assets/pi-otari-extension-demo.gif)
+
 ## Requirements
 
 - [Pi](https://pi.dev) 0.81.0 or newer, installed and available as `pi` (older versions can install the package but the extension will remain disabled and show an upgrade message)
@@ -69,7 +73,7 @@ After login and during provider refresh, the extension tries `GET ${OTARI_BASE_U
 If no models are found, provide one or more Otari selectors before starting or restarting Pi:
 
 ```bash
-export OTARI_MODELS="anthropic:claude-sonnet-5,mzai:moonshotai/Kimi-K3"
+export OTARI_MODELS="anthropic:claude-sonnet-5,mistral:mistral-medium-3-5" # optional for non-mzai models with API keys registered on Otari.ai
 pi
 ```
 
