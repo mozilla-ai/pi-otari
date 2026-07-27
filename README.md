@@ -9,7 +9,7 @@
   <a href="https://github.com/mozilla-ai/pi-otari/actions/workflows/ci.yml"><img src="https://github.com/mozilla-ai/pi-otari/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
 </p>
 
-Route [Pi](https://pi.dev) model requests through [Otari](https://otari.ai) for usage tracking, budgets, traces, routing, and provider-key management.
+[Pi](https://pi.dev) is a minimal, extensible terminal coding harness, while [Otari](https://otari.ai) is an AI control plane and gateway for routing model requests, managing provider credentials, and tracking usage, budgets, and traces. This extension connects them so Pi can use Otari-managed models.
 
 ## Requirements
 
