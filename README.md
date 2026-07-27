@@ -13,9 +13,7 @@
 
 ## Demo
 
-[<img src="assets/pi-otari-extension-demo-thumbnail.png" alt="Pi Otari extension demo video" width="960">](assets/pi-otari-extension-demo.mp4)
-
-*Click the preview to watch the demo video.*
+![Pi Otari extension demo](assets/pi-otari-extension-demo.gif)
 
 ## Requirements
 
