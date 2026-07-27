@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_TOKENS,
   parseManagedCatalog,
   parseStandardModelList,
   toProviderModel,
@@ -69,8 +71,8 @@ describe("model mapping", () => {
       name: "x:model",
       reasoning: false,
       input: ["text"],
-      contextWindow: 128000,
-      maxTokens: 16384,
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      maxTokens: DEFAULT_MAX_TOKENS,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     });
   });

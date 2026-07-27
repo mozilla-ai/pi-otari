@@ -1,6 +1,10 @@
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import type { ModelCost, OtariModel } from "./types.js";
 
+/** Conservative fallbacks for models whose metadata omits these limits. */
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
+export const DEFAULT_MAX_TOKENS = 16_384;
+
 const ZERO_COST: ModelCost = {
   input: 0,
   output: 0,
@@ -122,7 +126,7 @@ export function toProviderModel(model: OtariModel): ProviderModelConfig {
     reasoning: model.reasoning ?? false,
     input: model.input ?? ["text"],
     cost: model.cost ?? ZERO_COST,
-    contextWindow: model.contextWindow ?? 128000,
-    maxTokens: model.maxTokens ?? 16384,
+    contextWindow: model.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+    maxTokens: model.maxTokens ?? DEFAULT_MAX_TOKENS,
   };
 }
