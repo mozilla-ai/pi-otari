@@ -115,25 +115,6 @@ export function selectorsToModels(selectors: string[]): OtariModel[] {
   return selectors.map((id) => ({ id, name: id, source: "environment" }));
 }
 
-export function asStaleCache(models: OtariModel[]): OtariModel[] {
-  return models.map((model) => ({ ...model, source: "stale-cache" }));
-}
-
-export function mergeModels(
-  stale: OtariModel[],
-  environment: OtariModel[],
-  managed: OtariModel[],
-  standard: OtariModel[],
-): OtariModel[] {
-  const byId = new Map<string, OtariModel>();
-  for (const group of [stale, environment, managed, standard]) {
-    for (const model of group) byId.set(model.id, model);
-  }
-  return [...byId.values()].sort((left, right) =>
-    left.id.localeCompare(right.id),
-  );
-}
-
 export function toProviderModel(model: OtariModel): ProviderModelConfig {
   return {
     id: model.id,

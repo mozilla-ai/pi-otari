@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { discoverModels, MANAGED_CATALOG_URL } from "../src/discovery.js";
-import type { ModelCache, OtariConfig } from "../src/types.js";
+import type { OtariConfig } from "../src/types.js";
 
 const base: OtariConfig = {
   baseUrl: "https://api.otari.ai/v1",
@@ -16,12 +16,6 @@ const response = (status: number, body: unknown): Response =>
     headers: { "content-type": "application/json" },
   });
 
-const cache: ModelCache = {
-  schemaVersion: 1,
-  fetchedAt: "2026-07-17T00:00:00.000Z",
-  models: [{ id: "cached:model", source: "standard" }],
-};
-
 describe("discoverModels", () => {
   it("uses standard discovery and sends bearer auth", async () => {
     const fetcher = vi.fn(
@@ -30,25 +24,21 @@ describe("discoverModels", () => {
           "Bearer tk_secret",
         );
         expect(init?.redirect).toBe("error");
-        return response(200, { data: [{ id: "anthropic:claude" }] });
+        return response(200, { data: [{ id: "mzai:test-model" }] });
       },
     );
-    const result = await discoverModels(
-      base,
-      undefined,
-      fetcher as typeof fetch,
-    );
-    expect(result.models.map((model) => model.id)).toEqual([
-      "anthropic:claude",
-    ]);
+    const result = await discoverModels(base, fetcher as typeof fetch);
+    expect(result.models.map((model) => model.id)).toEqual(["mzai:test-model"]);
     expect(result.source).toBe("standard");
   });
 
   it("uses the public managed catalog only for hosted 404", async () => {
-    const fetcher = vi.fn(async (url: string | URL | Request) => {
-      const target = String(url);
-      return target === MANAGED_CATALOG_URL
-        ? response(200, {
+    const fetcher = vi.fn(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        const target = String(url);
+        if (target === MANAGED_CATALOG_URL) {
+          expect(new Headers(init?.headers).get("authorization")).toBeNull();
+          return response(200, {
             data: [
               {
                 provider: "mzai",
@@ -57,57 +47,71 @@ describe("discoverModels", () => {
                 output_price_per_million: "2",
               },
             ],
-          })
-        : response(404, { detail: "Not Found" });
-    });
-    const result = await discoverModels(
-      base,
-      undefined,
-      fetcher as typeof fetch,
+          });
+        }
+        return response(404, { detail: "Not Found" });
+      },
     );
+    const result = await discoverModels(base, fetcher as typeof fetch);
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(result.models[0].id).toBe("mzai:org/model");
     expect(result.source).toBe("managed-catalog");
   });
 
-  it("does not use hosted fallback for a custom endpoint", async () => {
-    const fetcher = vi.fn(async () => response(404, {}));
-    const result = await discoverModels(
-      { ...base, baseUrl: "https://self.example/v1", officialHosted: false },
-      cache,
-      fetcher as typeof fetch,
+  it("rejects a managed-catalog outage without replacing native cache", async () => {
+    const fetcher = vi.fn(async (url: string | URL | Request) =>
+      String(url) === MANAGED_CATALOG_URL
+        ? response(500, {})
+        : response(404, {}),
     );
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(result.models[0]).toMatchObject({
-      id: "cached:model",
-      source: "stale-cache",
+    await expect(
+      discoverModels(base, fetcher as typeof fetch),
+    ).rejects.toMatchObject({
+      name: "DiscoveryUnavailableError",
+      diagnostic: { code: "managed-catalog-http" },
     });
   });
 
+  it("does not use hosted fallback for a custom endpoint", async () => {
+    const fetcher = vi.fn(async () => response(404, {}));
+    await expect(
+      discoverModels(
+        { ...base, baseUrl: "https://self.example/v1", officialHosted: false },
+        fetcher as typeof fetch,
+      ),
+    ).rejects.toMatchObject({
+      name: "DiscoveryUnavailableError",
+      diagnostic: { code: "discovery-http" },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it.each([401, 403])(
-    "does not hide auth status %s with stale cache",
+    "treats auth status %s as authoritative",
     async (status) => {
       const result = await discoverModels(
         base,
-        cache,
         vi.fn(async () => response(status, {})) as typeof fetch,
       );
       expect(result.models).toEqual([]);
       expect(result.diagnostics[0].code).toBe("discovery-auth");
+      expect(result.diagnostics[0].message).toContain("/login otari");
     },
   );
 
   it.each([429, 500])(
-    "uses stale cache for transient status %s",
+    "rejects transient status %s without replacing Pi's native model cache",
     async (status) => {
-      const result = await discoverModels(
-        base,
-        cache,
-        vi.fn(async () => response(status, {})) as typeof fetch,
-      );
-      expect(result.models[0]).toMatchObject({
-        id: "cached:model",
-        source: "stale-cache",
+      await expect(
+        discoverModels(
+          base,
+          vi.fn(async () => response(status, {})) as typeof fetch,
+        ),
+      ).rejects.toMatchObject({
+        name: "DiscoveryUnavailableError",
+        diagnostic: {
+          code: status === 429 ? "discovery-rate-limit" : "discovery-http",
+        },
       });
     },
   );
@@ -115,48 +119,58 @@ describe("discoverModels", () => {
   it("treats a valid empty 200 as authoritative", async () => {
     const result = await discoverModels(
       base,
-      cache,
       vi.fn(async () => response(200, { data: [] })) as typeof fetch,
     );
     expect(result.models).toEqual([]);
-    expect(result.cacheUpdate).toEqual([]);
+    expect(result.source).toBe("none");
   });
 
-  it("uses stale cache when a non-empty response contains no valid models", async () => {
-    const result = await discoverModels(
-      base,
-      cache,
-      vi.fn(async () =>
-        response(200, { data: [{ object: "model" }] }),
-      ) as typeof fetch,
-    );
-    expect(result.models[0]).toMatchObject({
-      id: "cached:model",
-      source: "stale-cache",
+  it("rejects an invalid non-empty model response", async () => {
+    await expect(
+      discoverModels(
+        base,
+        vi.fn(async () =>
+          response(200, { data: [{ object: "model" }] }),
+        ) as typeof fetch,
+      ),
+    ).rejects.toMatchObject({
+      name: "DiscoveryUnavailableError",
+      diagnostic: { code: "discovery-invalid" },
     });
-    expect(result.diagnostics[0].code).toBe("discovery-invalid");
   });
 
-  it("merges OTARI_MODELS and recovers a zero-model result", async () => {
+  it("leaves OTARI_MODELS to the provider's static model baseline", async () => {
     const result = await discoverModels(
-      { ...base, environmentModels: ["anthropic:manual"] },
-      cache,
+      { ...base, environmentModels: ["mzai:manual-model"] },
       vi.fn(async () => response(200, { data: [] })) as typeof fetch,
     );
-    expect(result.models[0]).toMatchObject({
-      id: "anthropic:manual",
-      source: "environment",
-    });
+    expect(result.models).toEqual([]);
+    expect(result.source).toBe("none");
   });
 
-  it("never includes the token in diagnostics", async () => {
-    const result = await discoverModels(
-      base,
-      undefined,
-      vi.fn(async () => {
-        throw new Error("network down");
-      }) as typeof fetch,
-    );
-    expect(JSON.stringify(result.diagnostics)).not.toContain("tk_secret");
+  it("rejects network failures without exposing the token", async () => {
+    let error: unknown;
+    try {
+      await discoverModels(
+        base,
+        vi.fn(async () => {
+          throw new Error("network down");
+        }) as typeof fetch,
+      );
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toMatchObject({
+      name: "DiscoveryUnavailableError",
+      diagnostic: { code: "discovery-unavailable" },
+    });
+    expect(JSON.stringify(error)).not.toContain("tk_secret");
+  });
+
+  it("guides missing credentials to native login", async () => {
+    const result = await discoverModels({ ...base, token: undefined });
+    expect(result.models).toEqual([]);
+    expect(result.diagnostics[0]).toMatchObject({ code: "token-missing" });
+    expect(result.diagnostics[0].message).toContain("/login otari");
   });
 });

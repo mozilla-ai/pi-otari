@@ -15,6 +15,16 @@ function updateStatus(
   );
 }
 
+async function isOtariConfigured(ctx: ExtensionContext): Promise<boolean> {
+  try {
+    return (await ctx.modelRegistry.getProviderAuth("otari")) !== undefined;
+  } catch {
+    // A transient credential-store error is not evidence of missing auth;
+    // stay quiet rather than nag a user who may already be logged in.
+    return true;
+  }
+}
+
 export function registerLifecycleUI(
   pi: ExtensionAPI,
   getState: () => RuntimeState,
@@ -23,26 +33,25 @@ export function registerLifecycleUI(
     updateStatus(ctx, event.model.provider, event.model.id);
   });
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     updateStatus(ctx, ctx.model?.provider, ctx.model?.id);
     if (!ctx.hasUI) return;
 
-    const state = getState();
-    const error = state.diagnostics.find((item) => item.level === "error");
+    const error = getState().diagnostics.find((item) => item.level === "error");
     if (error) {
       ctx.ui.notify(error.message, "error");
       return;
     }
-    if (state.models.length === 0) {
+
+    // Discovery diagnostics are surfaced natively by Pi's model refresh, which
+    // runs after this event. The one thing we can check reliably at startup is
+    // whether any credential (stored via /login or OTARI_API_KEY) exists.
+    if (!(await isOtariConfigured(ctx))) {
       ctx.ui.notify(
-        "Pi–Otari found no available models.\n" +
-          "Set OTARI_MODELS to one or more Otari selectors, then run /reload.\n" +
-          'Example: OTARI_MODELS="anthropic:claude-sonnet-4-6"',
+        "No Otari credentials found.\n" +
+          "Run /login otari to sign in, or set OTARI_API_KEY.",
         "warning",
       );
-      return;
     }
-    const warning = state.diagnostics.find((item) => item.level === "warning");
-    if (warning) ctx.ui.notify(warning.message, "warning");
   });
 }

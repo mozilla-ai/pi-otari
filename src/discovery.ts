@@ -1,14 +1,7 @@
-import {
-  asStaleCache,
-  mergeModels,
-  parseManagedCatalog,
-  parseStandardModelList,
-  selectorsToModels,
-} from "./model-mapper.js";
+import { parseManagedCatalog, parseStandardModelList } from "./model-mapper.js";
 import type {
   Diagnostic,
   DiscoveryResult,
-  ModelCache,
   OtariConfig,
   OtariModel,
 } from "./types.js";
@@ -17,6 +10,13 @@ export const MANAGED_CATALOG_URL =
   "https://api.otari.ai/api/v1/managed-models-pricing/mzai-models";
 
 type Fetcher = typeof fetch;
+
+export class DiscoveryUnavailableError extends Error {
+  constructor(public readonly diagnostic: Diagnostic) {
+    super(diagnostic.message);
+    this.name = "DiscoveryUnavailableError";
+  }
+}
 
 async function request(
   url: string,
@@ -40,49 +40,19 @@ async function request(
   }
 }
 
-function transientFallback(
-  cache: ModelCache | undefined,
-  environment: OtariModel[],
-  diagnostic: Diagnostic,
-): DiscoveryResult {
-  const stale = cache ? asStaleCache(cache.models) : [];
-  return {
-    models: mergeModels(stale, environment, [], []),
-    source:
-      stale.length > 0
-        ? "stale-cache"
-        : environment.length > 0
-          ? "environment"
-          : "none",
-    diagnostics: [diagnostic],
-  };
-}
-
 function successful(
   models: OtariModel[],
-  environment: OtariModel[],
   source: "standard" | "managed-catalog",
 ): DiscoveryResult {
   return {
-    models:
-      source === "standard"
-        ? mergeModels([], environment, [], models)
-        : mergeModels([], environment, models, []),
-    source:
-      models.length > 0
-        ? source
-        : environment.length > 0
-          ? "environment"
-          : "none",
+    models,
+    source: models.length > 0 ? source : "none",
     diagnostics: [],
-    cacheUpdate: models,
   };
 }
 
 async function managedFallback(
   config: OtariConfig,
-  cache: ModelCache | undefined,
-  environment: OtariModel[],
   fetcher: Fetcher,
 ): Promise<DiscoveryResult> {
   try {
@@ -93,7 +63,7 @@ async function managedFallback(
       fetcher,
     );
     if (!response.ok) {
-      return transientFallback(cache, environment, {
+      throw new DiscoveryUnavailableError({
         level: "warning",
         code: "managed-catalog-http",
         message: `Otari managed catalog returned HTTP ${response.status}`,
@@ -101,11 +71,11 @@ async function managedFallback(
     }
     return successful(
       parseManagedCatalog(await response.json()),
-      environment,
       "managed-catalog",
     );
-  } catch {
-    return transientFallback(cache, environment, {
+  } catch (error) {
+    if (error instanceof DiscoveryUnavailableError) throw error;
+    throw new DiscoveryUnavailableError({
       level: "warning",
       code: "managed-catalog-unavailable",
       message: "Otari managed catalog is temporarily unavailable",
@@ -115,16 +85,21 @@ async function managedFallback(
 
 export async function discoverModels(
   config: OtariConfig,
-  cache: ModelCache | undefined,
   fetcher: Fetcher = fetch,
 ): Promise<DiscoveryResult> {
-  const environment = selectorsToModels(config.environmentModels);
   if (!config.token) {
-    return transientFallback(cache, environment, {
-      level: "error",
-      code: "token-missing",
-      message: "Set OTARI_API_KEY and run /reload",
-    });
+    return {
+      models: [],
+      source: "none",
+      diagnostics: [
+        {
+          level: "error",
+          code: "token-missing",
+          message:
+            "Run /login otari to save an Otari API key, or set OTARI_API_KEY and run /reload",
+        },
+      ],
+    };
   }
 
   try {
@@ -138,11 +113,10 @@ export async function discoverModels(
       try {
         return successful(
           parseStandardModelList(await response.json()),
-          environment,
           "standard",
         );
       } catch {
-        return transientFallback(cache, environment, {
+        throw new DiscoveryUnavailableError({
           level: "warning",
           code: "discovery-invalid",
           message: "Otari returned an invalid model-list response",
@@ -153,28 +127,30 @@ export async function discoverModels(
       (response.status === 404 || response.status === 405) &&
       config.officialHosted
     ) {
-      return managedFallback(config, cache, environment, fetcher);
+      return managedFallback(config, fetcher);
     }
     if (response.status === 401 || response.status === 403) {
       return {
-        models: environment,
-        source: environment.length > 0 ? "environment" : "none",
+        models: [],
+        source: "none",
         diagnostics: [
           {
             level: "error",
             code: "discovery-auth",
-            message: `Otari model discovery returned HTTP ${response.status}; check OTARI_API_KEY and workspace access`,
+            message: `Otari model discovery returned HTTP ${response.status}; run /login otari with a valid key or update OTARI_API_KEY, then confirm workspace access`,
           },
         ],
       };
     }
-    return transientFallback(cache, environment, {
+    const diagnostic: Diagnostic = {
       level: "warning",
       code: response.status === 429 ? "discovery-rate-limit" : "discovery-http",
       message: `Otari model discovery returned HTTP ${response.status}`,
-    });
-  } catch {
-    return transientFallback(cache, environment, {
+    };
+    throw new DiscoveryUnavailableError(diagnostic);
+  } catch (error) {
+    if (error instanceof DiscoveryUnavailableError) throw error;
+    throw new DiscoveryUnavailableError({
       level: "warning",
       code: "discovery-unavailable",
       message: "Otari model discovery is temporarily unavailable",

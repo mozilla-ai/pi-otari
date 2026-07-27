@@ -1,8 +1,4 @@
-export type ModelSource =
-  | "standard"
-  | "managed-catalog"
-  | "environment"
-  | "stale-cache";
+export type ModelSource = "standard" | "managed-catalog" | "environment";
 export type DiagnosticLevel = "warning" | "error";
 
 export interface Diagnostic {
@@ -37,17 +33,10 @@ export interface OtariConfig {
   officialHosted: boolean;
 }
 
-export interface ModelCache {
-  schemaVersion: 1;
-  fetchedAt: string;
-  models: OtariModel[];
-}
-
 export interface DiscoveryResult {
   models: OtariModel[];
   source: ModelSource | "none";
   diagnostics: Diagnostic[];
-  cacheUpdate?: OtariModel[];
 }
 
 export interface RuntimeState {

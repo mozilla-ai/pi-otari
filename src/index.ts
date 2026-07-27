@@ -1,19 +1,30 @@
 import {
   type ExtensionAPI,
   type ExtensionFactory,
-  getAgentDir,
+  VERSION,
 } from "@earendil-works/pi-coding-agent";
-import { readModelCache, writeModelCache } from "./cache.js";
 import { ConfigError, loadOtariConfig } from "./config.js";
-import { discoverModels } from "./discovery.js";
-import { registerOtariProvider } from "./provider.js";
 import { registerLifecycleUI } from "./status.js";
-import type { Diagnostic, OtariConfig, RuntimeState } from "./types.js";
+import type { OtariConfig, RuntimeState } from "./types.js";
+
+const MINIMUM_PI_VERSION = [0, 81, 0] as const;
+
+function supportsNativeProviderAuth(version: string): boolean {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!match) return false;
+  const actual = match.slice(1).map(Number);
+  for (let index = 0; index < MINIMUM_PI_VERSION.length; index += 1) {
+    if (actual[index] !== MINIMUM_PI_VERSION[index]) {
+      return actual[index] > MINIMUM_PI_VERSION[index];
+    }
+  }
+  return !version.slice(match[0].length).startsWith("-");
+}
 
 export interface ExtensionDependencies {
   env?: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
-  agentDir?: () => string;
+  piVersion?: string;
 }
 
 export function createOtariExtension(
@@ -26,6 +37,21 @@ export function createOtariExtension(
       discoverySource: "none",
     };
     registerLifecycleUI(pi, () => state);
+
+    if (!supportsNativeProviderAuth(dependencies.piVersion ?? VERSION)) {
+      state = {
+        models: [],
+        discoverySource: "none",
+        diagnostics: [
+          {
+            level: "error",
+            code: "pi-version",
+            message: "pi-otari requires Pi 0.81.0 or newer. Run `pi update`.",
+          },
+        ],
+      };
+      return;
+    }
 
     let config: OtariConfig;
     try {
@@ -49,37 +75,11 @@ export function createOtariExtension(
       return;
     }
 
-    const agentDir = (dependencies.agentDir ?? getAgentDir)();
-    const cacheResult = await readModelCache(agentDir);
-    const discovery = await discoverModels(
-      config,
-      cacheResult.cache,
-      dependencies.fetch ?? fetch,
-    );
-    const diagnostics: Diagnostic[] = [
-      ...(cacheResult.diagnostic ? [cacheResult.diagnostic] : []),
-      ...discovery.diagnostics,
-    ];
-
-    if (discovery.cacheUpdate !== undefined) {
-      try {
-        await writeModelCache(agentDir, discovery.cacheUpdate);
-      } catch {
-        diagnostics.push({
-          level: "warning",
-          code: "cache-write",
-          message: "Could not update the Pi–Otari model cache",
-        });
-      }
-    }
-
-    registerOtariProvider(pi, config, discovery.models);
-    state = {
-      config,
-      models: discovery.models,
-      diagnostics,
-      discoverySource: discovery.source,
-    };
+    const { registerOtariProvider } = await import("./provider.js");
+    registerOtariProvider(pi, config, [], {
+      fetch: dependencies.fetch ?? fetch,
+    });
+    state = { ...state, config };
   };
 }
 
