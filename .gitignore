@@ -1,6 +1,7 @@
 node_modules/
 docs/superpowers/
 .pi-subagents/
+.gstack/
 coverage/
 dist/
 *.tgz
