@@ -4,19 +4,61 @@
   <a href="https://otari.ai"><img src="assets/otari-logo.svg" alt="Otari" height="64"></a>
 </p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@mozilla-ai/pi-otari"><img src="https://img.shields.io/npm/v/%40mozilla-ai%2Fpi-otari" alt="npm version"></a>
+  <a href="https://github.com/mozilla-ai/pi-otari/actions/workflows/ci.yml"><img src="https://github.com/mozilla-ai/pi-otari/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+</p>
+
 Route [Pi](https://pi.dev) model requests through [Otari](https://otari.ai) for usage tracking, budgets, traces, routing, and provider-key management.
 
-## Install
+## Requirements
+
+- [Pi](https://pi.dev) installed and available as `pi`
+- Node.js 22.19.0 or newer
+- An Otari workspace API key
+- At least one upstream provider and model enabled in your Otari workspace
+
+## Install and use
+
+1. Install the extension from npm:
+
+   ```bash
+   pi install npm:@mozilla-ai/pi-otari
+   ```
+
+2. Export your Otari workspace API key in the shell where you run Pi:
+
+   ```bash
+   export OTARI_API_KEY=tk_example
+   ```
+
+   Keep the key out of source control. Use your shell's secure configuration or a secret manager if you want it available in future terminal sessions.
+
+3. Start Pi:
+
+   ```bash
+   pi
+   ```
+
+4. Make Otari models available in Pi:
+
+   - Run `/scoped-models`.
+   - Search for `otari`.
+   - Enable the models you want to use.
+   - Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to save the scope.
+
+5. Run `/model` and select one of the enabled `otari` models.
+
+6. Send a prompt normally. No Otari-specific slash command is required. When an Otari model is selected, Pi's status area shows `Otari → <model-id>`.
+
+Pi sends requests for the selected provider to `https://api.otari.ai/v1/chat/completions`. Local Pi tools continue to run according to your Pi configuration.
+
+### Update or remove
 
 ```bash
-pi install npm:@mozilla-ai/pi-otari
-export OTARI_API_KEY=tk_example
-pi
+pi update npm:@mozilla-ai/pi-otari
+pi remove npm:@mozilla-ai/pi-otari
 ```
-
-> **Note:** Otari models do not appear in `/model` until you run `/scoped-models`, search for `otari`, enable the models you want, and press Ctrl+S to save the scope.
-
-Then open Pi's built-in `/model` selector and choose one of the enabled Otari models. No Otari-specific slash command is required. Pi sends requests for that selected provider to `https://api.otari.ai/v1/chat/completions`; local Pi tools continue to run according to your Pi configuration.
 
 ## Model discovery
 
@@ -55,7 +97,7 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 
 ## Troubleshooting
 
-- **No Otari models in `/model`:** set `OTARI_MODELS`, then run `/reload`.
+- **No Otari models in `/model`:** run `/scoped-models`, search for `otari`, enable models, and press <kbd>Ctrl</kbd>+<kbd>S</kbd>. If no models are available there, set `OTARI_MODELS` and run `/reload`.
 - **401/403:** regenerate or re-export `OTARI_API_KEY` and confirm workspace access.
 - **Unknown model:** use an Otari selector enabled for the workspace.
 - **Model returns 404 "not found on the provider":** the hosted managed catalog lists priced models that may not all be deployed. Pick another model.
@@ -64,11 +106,36 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 
 ## Development
 
+Install the locked dependency versions and run all validation:
+
 ```bash
-npm install
+npm ci
 npm run check
-pi -e ./src/index.ts
 ```
+
+Load the local extension in Pi:
+
+```bash
+OTARI_API_KEY=tk_example pi -e ./src/index.ts
+```
+
+If the npm package is already installed, disable it temporarily with `pi config` while testing the local extension so Pi does not load both copies. Use `npm install` instead of `npm ci` only when intentionally changing dependencies or updating `package-lock.json`.
+
+## Releasing
+
+Releases are published to npm through GitHub Actions and npm trusted publishing:
+
+1. Update `package.json` and `package-lock.json` together:
+
+   ```bash
+   npm version <version> --no-git-tag-version
+   ```
+
+2. Open and merge the version PR after CI passes.
+3. Publish a GitHub Release whose tag exactly matches `v<version>`.
+4. Verify the `Publish to npm` workflow and the package version on npm.
+
+Stable releases publish with the npm tag `latest`; GitHub prereleases publish with `next`. Do not run `npm publish` manually for normal releases.
 
 ## License
 
