@@ -68,12 +68,12 @@ pi remove npm:@mozilla-ai/pi-otari
 
 ## Model discovery
 
-After login and during provider refresh, the extension tries `GET ${OTARI_BASE_URL}/models`. Standalone and self-hosted Otari support this now. Hosted Otari currently falls back to its public managed `mzai` catalog and will automatically use workspace-scoped `/models` when that endpoint becomes available.
+After login and during provider refresh, the extension uses authenticated, workspace-scoped model discovery. Hosted Otari queries `GET https://api.otari.ai/api/v1/models`; custom and self-hosted installations query `GET ${OTARI_BASE_URL}/models`. Only models available through providers enabled for the authenticated workspace are registered. If the hosted endpoint responds with `404` or `405`, the extension safely falls back to the public managed `mzai` catalog without sending the workspace token.
 
-If no models are found, provide one or more Otari selectors before starting or restarting Pi:
+If no models are found, provide one or more explicit Otari selectors before starting or restarting Pi:
 
 ```bash
-export OTARI_MODELS="anthropic:claude-sonnet-5,mistral:mistral-medium-3-5" # optional for non-mzai models with API keys registered on Otari.ai
+export OTARI_MODELS="anthropic:claude-sonnet-5,mistral:mistral-medium-3-5" # optional fallback or additional selectors
 pi
 ```
 
@@ -125,8 +125,7 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 - **No Otari models in `/model`:** run `/scoped-models`, search for `otari`, enable models, and press <kbd>Ctrl</kbd>+<kbd>S</kbd>. If no models are available there, set `OTARI_MODELS` before starting or restarting Pi.
 - **Missing credentials:** run `/login otari`, or set `OTARI_API_KEY` before starting or restarting Pi.
 - **401/403:** run `/login otari` with a valid replacement key, or update `OTARI_API_KEY` when no stored credential exists and restart Pi; then confirm workspace access.
-- **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, or select a different Otari model in Pi.
-- **Model returns 404 "not found on the provider":** the hosted managed catalog lists priced models that may not all be deployed. Pick another model.
+- **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, refresh the provider, or select a different Otari model in Pi.
 
 ## Contributing
 
