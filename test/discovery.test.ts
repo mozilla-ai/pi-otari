@@ -62,31 +62,34 @@ describe("discoverModels", () => {
     ]);
   });
 
-  it("uses the public managed catalog only for hosted 404", async () => {
-    const fetcher = vi.fn(
-      async (url: string | URL | Request, init?: RequestInit) => {
-        const target = String(url);
-        if (target === MANAGED_CATALOG_URL) {
-          expect(new Headers(init?.headers).get("authorization")).toBeNull();
-          return response(200, {
-            data: [
-              {
-                provider: "mzai",
-                model: "org/model",
-                input_price_per_million: "1",
-                output_price_per_million: "2",
-              },
-            ],
-          });
-        }
-        return response(404, { detail: "Not Found" });
-      },
-    );
-    const result = await discoverModels(base, fetcher as typeof fetch);
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(result.models[0].id).toBe("mzai:org/model");
-    expect(result.source).toBe("managed-catalog");
-  });
+  it.each([404, 405])(
+    "uses the public managed catalog only for hosted %s",
+    async (status) => {
+      const fetcher = vi.fn(
+        async (url: string | URL | Request, init?: RequestInit) => {
+          const target = String(url);
+          if (target === MANAGED_CATALOG_URL) {
+            expect(new Headers(init?.headers).get("authorization")).toBeNull();
+            return response(200, {
+              data: [
+                {
+                  provider: "mzai",
+                  model: "org/model",
+                  input_price_per_million: "1",
+                  output_price_per_million: "2",
+                },
+              ],
+            });
+          }
+          return response(status, { detail: "Not Found" });
+        },
+      );
+      const result = await discoverModels(base, fetcher as typeof fetch);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(result.models[0].id).toBe("mzai:org/model");
+      expect(result.source).toBe("managed-catalog");
+    },
+  );
 
   it("rejects a managed-catalog outage without replacing native cache", async () => {
     const fetcher = vi.fn(async (url: string | URL | Request) =>
