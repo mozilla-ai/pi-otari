@@ -22,11 +22,12 @@ function registeredProvider(pi: ExtensionAPI): Provider {
 }
 
 describe("registerOtariProvider", () => {
-  it("registers OpenAI-compatible models with PR #20 reasoning semantics", () => {
+  it("registers models with discovered reasoning capabilities", () => {
     const pi = fakePi();
     expect(
       registerOtariProvider(pi, config, [
-        { id: "mzai:test-model", source: "standard" },
+        { id: "mzai:reasoning-model", reasoning: true, source: "standard" },
+        { id: "mzai:text-model", reasoning: false, source: "standard" },
       ]),
     ).toBe(true);
 
@@ -36,7 +37,7 @@ describe("registerOtariProvider", () => {
       baseUrl: config.baseUrl,
     });
     expect(provider.getModels()[0]).toMatchObject({
-      id: "mzai:test-model",
+      id: "mzai:reasoning-model",
       api: "openai-completions",
       reasoning: true,
       thinkingLevelMap: {
@@ -52,6 +53,11 @@ describe("registerOtariProvider", () => {
         supportsDeveloperRole: false,
       },
     });
+    expect(provider.getModels()[1]).toMatchObject({
+      id: "mzai:text-model",
+      reasoning: false,
+    });
+    expect(provider.getModels()[1]?.thinkingLevelMap).toBeUndefined();
     expect(JSON.stringify(provider)).not.toContain(config.token);
   });
 

@@ -57,7 +57,9 @@ describe("Pi–Otari integration", () => {
     const server = createServer(async (request, response) => {
       if (request.method === "GET" && request.url === "/v1/models") {
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ data: [{ id: "test-model" }] }));
+        response.end(
+          JSON.stringify({ data: [{ id: "test-model", reasoning: true }] }),
+        );
         return;
       }
       if (request.method === "POST" && request.url === "/v1/chat/completions") {

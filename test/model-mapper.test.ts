@@ -25,12 +25,35 @@ describe("model mapping", () => {
     });
     expect(models[0]).toMatchObject({
       id: "anthropic:claude",
+      reasoning: true,
       input: ["text", "image"],
       contextWindow: 200000,
       maxTokens: 32000,
       source: "standard",
       cost: { input: 3, output: 15, cacheRead: 0, cacheWrite: 0 },
     });
+  });
+
+  it("maps hosted capability metadata to Pi booleans", () => {
+    const models = parseStandardModelList({
+      data: [
+        { id: "mzai:vision-reasoner", modality: "Vision", reasoning: true },
+        { id: "mzai:text-model", modality: "Text-to-text", reasoning: false },
+      ],
+    });
+
+    expect(models).toEqual([
+      expect.objectContaining({
+        id: "mzai:vision-reasoner",
+        reasoning: true,
+        input: ["text", "image"],
+      }),
+      expect.objectContaining({
+        id: "mzai:text-model",
+        reasoning: false,
+        input: undefined,
+      }),
+    ]);
   });
 
   it("accepts a valid empty list and rejects malformed model lists", () => {
