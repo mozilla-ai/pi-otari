@@ -6,6 +6,7 @@ import type {
   OtariModel,
 } from "./types.js";
 
+export const HOSTED_MODELS_URL = "https://api.otari.ai/api/v1/models";
 export const MANAGED_CATALOG_URL =
   "https://api.otari.ai/api/v1/managed-models-pricing/mzai-models";
 
@@ -103,8 +104,11 @@ export async function discoverModels(
   }
 
   try {
+    const discoveryUrl = config.officialHosted
+      ? HOSTED_MODELS_URL
+      : `${config.baseUrl}/models`;
     const response = await request(
-      `${config.baseUrl}/models`,
+      discoveryUrl,
       config.token,
       config.discoveryTimeoutMs,
       fetcher,

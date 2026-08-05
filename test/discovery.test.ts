@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { discoverModels, MANAGED_CATALOG_URL } from "../src/discovery.js";
+import {
+  discoverModels,
+  HOSTED_MODELS_URL,
+  MANAGED_CATALOG_URL,
+} from "../src/discovery.js";
 import type { OtariConfig } from "../src/types.js";
 
 const base: OtariConfig = {
@@ -17,19 +21,45 @@ const response = (status: number, body: unknown): Response =>
   });
 
 describe("discoverModels", () => {
-  it("uses standard discovery and sends bearer auth", async () => {
+  it("uses hosted workspace discovery and sends bearer auth", async () => {
     const fetcher = vi.fn(
-      async (_url: string | URL | Request, init?: RequestInit) => {
+      async (url: string | URL | Request, init?: RequestInit) => {
+        expect(String(url)).toBe(HOSTED_MODELS_URL);
         expect(new Headers(init?.headers).get("authorization")).toBe(
           "Bearer tk_secret",
         );
         expect(init?.redirect).toBe("error");
-        return response(200, { data: [{ id: "mzai:test-model" }] });
+        return response(200, {
+          object: "list",
+          data: [
+            {
+              id: "mistral:mistral-medium-3-5",
+              object: "model",
+              owned_by: "mistral",
+            },
+          ],
+        });
       },
     );
     const result = await discoverModels(base, fetcher as typeof fetch);
-    expect(result.models.map((model) => model.id)).toEqual(["mzai:test-model"]);
+    expect(result.models.map((model) => model.id)).toEqual([
+      "mistral:mistral-medium-3-5",
+    ]);
     expect(result.source).toBe("standard");
+  });
+
+  it("keeps custom discovery at OTARI_BASE_URL/models", async () => {
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe("https://self.example/v1/models");
+      return response(200, { data: [{ id: "custom:test-model" }] });
+    });
+    const result = await discoverModels(
+      { ...base, baseUrl: "https://self.example/v1", officialHosted: false },
+      fetcher as typeof fetch,
+    );
+    expect(result.models.map((model) => model.id)).toEqual([
+      "custom:test-model",
+    ]);
   });
 
   it("uses the public managed catalog only for hosted 404", async () => {
