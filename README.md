@@ -81,9 +81,9 @@ These selectors are unverified until the first request. Otari must have the corr
 
 ## Reasoning levels
 
-Otari models expose Pi's `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning levels. The extension forwards the selected level unchanged. Pi's default remains `medium` unless the user configures or selects another level.
+Models that Otari discovery marks as reasoning-capable expose Pi's `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning levels. Models without that capability use Pi's conservative non-reasoning default. The extension forwards the selected level unchanged. Pi's default remains `medium` unless the user configures or selects another level.
 
-Until Otari discovery provides per-model reasoning capabilities, these levels are optimistic: an upstream model may reject a level it does not support. The extension preserves that error without silently retrying at a different level or without reasoning. When the upstream error reports supported values, they appear in Pi's error message.
+Otari discovery does not yet provide each model's supported reasoning levels, so the levels exposed for a reasoning model are optimistic: an upstream model may reject a level it does not support. The extension preserves that error without silently retrying at a different level or without reasoning. When the upstream error reports supported values, they appear in Pi's error message.
 
 ## Non-interactive authentication
 

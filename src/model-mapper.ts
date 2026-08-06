@@ -40,6 +40,13 @@ function parseInput(value: unknown): Array<"text" | "image"> | undefined {
   return supported.length > 0 ? [...new Set(supported)] : undefined;
 }
 
+function parseModality(value: unknown): Array<"text" | "image"> | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.trim().toLowerCase() === "vision"
+    ? ["text", "image"]
+    : undefined;
+}
+
 function parseStandardEntry(value: unknown): OtariModel | undefined {
   const item = record(value);
   if (!item || typeof item.id !== "string" || item.id.trim() === "")
@@ -52,7 +59,7 @@ function parseStandardEntry(value: unknown): OtariModel | undefined {
         ? item.name.trim()
         : undefined,
     reasoning: typeof item.reasoning === "boolean" ? item.reasoning : undefined,
-    input: parseInput(item.input_modalities),
+    input: parseInput(item.input_modalities) ?? parseModality(item.modality),
     contextWindow: positiveNumber(item.context_window),
     maxTokens: positiveNumber(item.max_output_tokens),
     cost: pricing

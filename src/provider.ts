@@ -23,13 +23,15 @@ function toRuntimeModel(
   model: OtariModel,
   baseUrl: string,
 ): Model<"openai-completions"> {
+  const providerModel = toProviderModel(model);
   return {
-    ...toProviderModel(model),
+    ...providerModel,
     provider: "otari",
     baseUrl,
     api: "openai-completions",
-    reasoning: true,
-    thinkingLevelMap: THINKING_LEVEL_MAP,
+    ...(providerModel.reasoning
+      ? { thinkingLevelMap: THINKING_LEVEL_MAP }
+      : {}),
     compat: {
       maxTokensField: "max_tokens",
       supportsDeveloperRole: false,
