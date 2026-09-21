@@ -51,13 +51,15 @@
 
 6. Send a prompt normally. No Otari-specific slash command is required. When an Otari model is selected, Pi's status area shows `Otari → <model-id>`.
 
-Pi sends requests for the selected provider to `https://api.otari.ai/api/v1/chat/completions`. Local Pi tools continue to run according to your Pi configuration.
+Pi sends requests for the selected provider to `${OTARI_BASE_URL}/chat/completions`, which is `https://api.otari.ai/api/v1/chat/completions` for hosted Otari. Local Pi tools continue to run according to your Pi configuration.
 
-To inspect the Otari models available to Pi from a shell, run:
+To list the Otari models Pi currently knows about from a shell, run:
 
 ```bash
 pi --list-models otari
 ```
+
+NOTE: this prints Pi's cached catalog and does not contact Otari; see [Model discovery](#model-discovery) for when the cache is refreshed.
 
 ### Update or remove
 
@@ -68,7 +70,17 @@ pi remove npm:@mozilla-ai/pi-otari
 
 ## Model discovery
 
-After login and during provider refresh, the extension uses authenticated, workspace-scoped model discovery. Hosted Otari queries `GET https://api.otari.ai/api/v1/models`; custom and self-hosted installations query `GET ${OTARI_BASE_URL}/models`. Only models available through providers enabled for the authenticated workspace are registered. If the hosted endpoint responds with `404` or `405`, the extension safely falls back to the public managed `mzai` catalog without sending the workspace token.
+After login and during provider refresh, the extension queries `{OTARI_BASE_URL}/models` (`https://api.otari.ai/api/v1/models` for hosted otari) with the workspace token. Only models available through providers enabled for the authenticated workspace are registered. If the hosted endpoint responds with `404` or `405`, the extension safely falls back to the public managed `mzai` catalog without sending the workspace token.
+
+### The model list is a cache
+
+Otari's catalog is dynamic: workspaces can enable and remove providers and models at any time. Pi stores the last discovered list in `~/.pi/agent/models-store.json` and shows that list until the next refresh. In interactive mode Pi refreshes in the background at startup, after `/login otari`, and whenever you open `/model`. Print mode and `pi --list-models` read the cache only.
+
+Refresh after changing `OTARI_BASE_URL`, after switching between hosted and self-hosted Otari, and after adding or removing models in Otari. Until then, entries from the previous catalog stay listed, and if they do not exist anymore a request to one of them fails with an error from the gateway.
+
+### Wrong API prefix
+
+If discovery gets `404` from a self-hosted gateway, the extension probes the other well-known API root's public health route, without sending the token, and shows a warning naming the exact `OTARI_BASE_URL` to set. Otari 0.6.0 and newer serve `/api/v1`; older gateways served `/v1`.
 
 If no models are found, provide one or more explicit Otari selectors before starting or restarting Pi:
 
@@ -98,9 +110,11 @@ A key stored through `/login otari` takes precedence over `OTARI_API_KEY`. Runni
 ## Self-hosted Otari
 
 ```bash
-export OTARI_BASE_URL=https://otari.example.com/v1
+export OTARI_BASE_URL=https://otari.example.com/api/v1
 pi
 ```
+
+`OTARI_BASE_URL` must include the gateway's API prefix, because Pi appends `/chat/completions` and discovery appends `/models` to it. Otari 0.6.0 and newer serve `/api/v1`; gateways older than 0.6.0 served `/v1`. A bare origin such as `https://otari.example.com` is rejected. For a gateway on your own machine, use `http://localhost:8000/api/v1`.
 
 Then run `/login otari`. For noninteractive use, set both `OTARI_BASE_URL` and `OTARI_API_KEY`.
 
@@ -111,13 +125,13 @@ HTTP is accepted only for loopback development endpoints.
 | Variable | Default | Description |
 |---|---|---|
 | `OTARI_API_KEY` | none | Workspace token or standalone key fallback when no stored credential exists |
-| `OTARI_BASE_URL` | `https://api.otari.ai/api/v1` | OpenAI-compatible base URL |
+| `OTARI_BASE_URL` | `https://api.otari.ai/api/v1` | OpenAI-compatible base URL, including the gateway's API prefix |
 | `OTARI_DISCOVERY_TIMEOUT_MS` | `5000` | Discovery timeout from 1000 to 30000 ms |
 | `OTARI_MODELS` | none | Conditional fallback or additional model selectors |
 
 ## Privacy and security
 
-Model requests using `otari/*` pass through Otari and the selected upstream provider. The extension does not maintain its own credential file. When you use `/login otari`, Pi stores the API key in `~/.pi/agent/auth.json`; when you use `OTARI_API_KEY`, the key remains environment-provided. The extension stores no prompts, responses, tool content, or telemetry. Pi persists provider model metadata in its native model store. Discovery rejects redirects and never sends a token to the public managed-catalog fallback.
+Model requests using `otari/*` pass through Otari and the selected upstream provider. The extension does not maintain its own credential file. When you use `/login otari`, Pi stores the API key in `~/.pi/agent/auth.json`; when you use `OTARI_API_KEY`, the key remains environment-provided. The extension stores no prompts, responses, tool content, or telemetry. Pi persists provider model metadata in its native model store. Discovery rejects redirects and never sends a token to the public managed-catalog fallback. When discovery returns `404` from a self-hosted gateway, the extension also requests that gateway's public health route on the other API prefix, again without the token.
 
 ## Troubleshooting
 
@@ -126,6 +140,9 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 - **Missing credentials:** run `/login otari`, or set `OTARI_API_KEY` before starting or restarting Pi.
 - **401/403:** run `/login otari` with a valid replacement key, or update `OTARI_API_KEY` when no stored credential exists and restart Pi; then confirm workspace access.
 - **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, refresh the provider, or select a different Otari model in Pi.
+- **“Otari model discovery returned HTTP 404 … Set OTARI_BASE_URL=…”:** `OTARI_BASE_URL` has the wrong API prefix for that gateway. Set it to the URL shown and restart Pi. Otari 0.6.0 and newer serve `/api/v1`; older gateways served `/v1`.
+- **“Could not refresh otari; showing cached models”:** this is Pi's summary. The extension's own warning next to it has the cause and, where possible, the fix.
+- **Models listed that no longer exist, or new ones missing:** the list is a cache. Open `/model` to refresh it. See [The model list is a cache](#the-model-list-is-a-cache).
 
 ## Contributing
 

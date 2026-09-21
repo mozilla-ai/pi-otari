@@ -41,15 +41,24 @@ Then run `/login otari` and enter a disposable test key in Pi's secret authentic
 OTARI_API_KEY=tk_example pi -e ./src/index.ts
 ```
 
-If the npm package is already installed, disable it temporarily with `pi config` so Pi does not load both the published and local copies.
+If the npm package is already installed, disable it temporarily with `pi config`, or pass `--no-extensions` so only the explicit `-e` path loads; otherwise Pi loads both the published and local copies.
 
-To test against self-hosted Otari, set the base URL for the same command:
+To test against self-hosted Otari, set the base URL for the same command. The value must include the gateway's API prefix, `/api/v1` for Otari 0.6.0 and newer:
 
 ```bash
 OTARI_API_KEY=your_otari_key \
-OTARI_BASE_URL=https://otari.example.com/v1 \
+OTARI_BASE_URL=https://otari.example.com/api/v1 \
 pi -e ./src/index.ts
 ```
+
+NOTE: `pi --list-models otari` only prints Pi's cached catalog. To exercise discovery, open `/model` in the interactive session. To exercise inference without discovery, pass a selector through `OTARI_MODELS` and run one prompt in print mode:
+
+```bash
+OTARI_MODELS=<model id> pi --no-extensions -e ./src/index.ts --no-session -p \
+  --model "otari/<model id>" "Reply with exactly: ok"
+```
+
+`npm run test:live` sends a single request straight to a gateway. Set `OTARI_LIVE_TEST_TOKEN` and `OTARI_LIVE_TEST_MODEL`, and `OTARI_LIVE_TEST_BASE_URL` to target a local gateway. Pick a plain instruct model: the request allows only a few output tokens, which reasoning models spend before producing text.
 
 ## Change dependencies
 
