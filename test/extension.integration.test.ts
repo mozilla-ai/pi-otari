@@ -103,7 +103,6 @@ describe("Pi–Otari integration", () => {
       agentDir,
       resourceLoader,
       sessionManager: SessionManager.inMemory(cwd),
-      thinkingLevel: "medium",
     });
     try {
       await session.modelRuntime.refresh({ allowNetwork: true });
@@ -295,7 +294,10 @@ describe("Pi–Otari integration", () => {
       });
       // Since Pi 0.86 login only stores the credential; the /login command
       // then refreshes the provider's catalog as a separate step.
-      await session.modelRuntime.refresh({ allowNetwork: true });
+      await session.modelRuntime.refresh({
+        providers: ["otari"],
+        allowNetwork: true,
+      });
       expect(discoveryCount).toBeGreaterThan(0);
       expect(JSON.stringify(session.state.messages)).not.toContain(
         "tk_login_integration",

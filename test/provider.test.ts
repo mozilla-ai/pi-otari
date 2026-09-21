@@ -149,6 +149,7 @@ describe("registerOtariProvider", () => {
     expect(storedModels).toEqual([
       expect.objectContaining({ id: "mzai:stored-model" }),
     ]);
+    expect(provider.getModels()).toEqual(storedModels);
   });
 
   it("uses OTARI_API_KEY for discovery when no stored credential exists", async () => {
