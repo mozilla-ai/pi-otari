@@ -110,9 +110,9 @@ describe("lifecycle UI", () => {
 
   it("does not show a success notification", async () => {
     const { handlers } = harness({
-      models: [{ id: "mzai:model", source: "managed-catalog" }],
+      models: [{ id: "mzai:model", source: "standard" }],
       diagnostics: [],
-      discoverySource: "managed-catalog",
+      discoverySource: "standard",
     });
     const ctx = context({ model: { provider: "otari", id: "mzai:model" } });
     await handlers.get("session_start")?.({ reason: "startup" }, ctx);

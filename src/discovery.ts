@@ -1,13 +1,10 @@
-import { parseManagedCatalog, parseStandardModelList } from "./model-mapper.js";
+import { parseStandardModelList } from "./model-mapper.js";
 import type {
   Diagnostic,
   DiscoveryResult,
   OtariConfig,
   OtariModel,
 } from "./types.js";
-
-export const MANAGED_CATALOG_URL =
-  "https://api.otari.ai/api/v1/managed-models-pricing/mzai-models";
 
 type Fetcher = typeof fetch;
 
@@ -40,47 +37,12 @@ async function request(
   }
 }
 
-function successful(
-  models: OtariModel[],
-  source: "standard" | "managed-catalog",
-): DiscoveryResult {
+function successful(models: OtariModel[], source: "standard"): DiscoveryResult {
   return {
     models,
     source: models.length > 0 ? source : "none",
     diagnostics: [],
   };
-}
-
-async function managedFallback(
-  config: OtariConfig,
-  fetcher: Fetcher,
-): Promise<DiscoveryResult> {
-  try {
-    const response = await request(
-      MANAGED_CATALOG_URL,
-      undefined,
-      config.discoveryTimeoutMs,
-      fetcher,
-    );
-    if (!response.ok) {
-      throw new DiscoveryUnavailableError({
-        level: "warning",
-        code: "managed-catalog-http",
-        message: `Otari managed catalog returned HTTP ${response.status}`,
-      });
-    }
-    return successful(
-      parseManagedCatalog(await response.json()),
-      "managed-catalog",
-    );
-  } catch (error) {
-    if (error instanceof DiscoveryUnavailableError) throw error;
-    throw new DiscoveryUnavailableError({
-      level: "warning",
-      code: "managed-catalog-unavailable",
-      message: "Otari managed catalog is temporarily unavailable",
-    });
-  }
 }
 
 /** The other well-known Otari API root for this gateway, if the URL uses one. */
@@ -182,7 +144,11 @@ export async function discoverModels(
       (response.status === 404 || response.status === 405) &&
       config.officialHosted
     ) {
-      return managedFallback(config, fetcher);
+      throw new DiscoveryUnavailableError({
+        level: "warning",
+        code: "discovery-http",
+        message: `Otari model discovery returned HTTP ${response.status} at ${discoveryUrl}; hosted model discovery is unavailable. No public catalog fallback is supported`,
+      });
     }
     if (response.status === 401 || response.status === 403) {
       return {

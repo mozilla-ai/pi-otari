@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CONTEXT_WINDOW,
   DEFAULT_MAX_TOKENS,
-  parseManagedCatalog,
   parseStandardModelList,
   toProviderModel,
 } from "../src/model-mapper.js";
@@ -62,28 +61,6 @@ describe("model mapping", () => {
     expect(() =>
       parseStandardModelList({ data: [{ object: "model" }] }),
     ).toThrow("valid model");
-    expect(() => parseManagedCatalog({ data: [{ provider: "mzai" }] })).toThrow(
-      "valid model",
-    );
-  });
-
-  it("maps the hosted managed catalog", () => {
-    expect(
-      parseManagedCatalog({
-        data: [
-          {
-            provider: "mzai",
-            model: "org/model",
-            input_price_per_million: "0.5",
-            output_price_per_million: "2",
-          },
-        ],
-      })[0],
-    ).toMatchObject({
-      id: "mzai:org/model",
-      source: "managed-catalog",
-      cost: { input: 0.5, output: 2 },
-    });
   });
 
   it("uses conservative Pi defaults", () => {
