@@ -76,6 +76,7 @@ describe("registerOtariProvider", () => {
           return "tk_stored";
         },
         notify: () => {},
+        signal: new AbortController().signal,
       }),
     ).toEqual({ type: "api_key", key: "tk_stored" });
   });
@@ -117,20 +118,20 @@ describe("registerOtariProvider", () => {
 
     await provider.refreshModels?.({
       credential: { type: "api_key", key: "tk_stored" },
-      store: {
-        read: async () => undefined,
-        write: async (entry) => {
-          storedModels = entry.models;
-        },
-        delete: async () => {},
+      publish: async ({ persist, update }) => {
+        storedModels = persist?.models;
+        update?.();
+        return true;
       },
       allowNetwork: true,
+      signal: new AbortController().signal,
     });
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(storedModels).toEqual([
       expect.objectContaining({ id: "mzai:stored-model" }),
     ]);
+    expect(provider.getModels()).toEqual(storedModels);
   });
 
   it("uses OTARI_API_KEY for discovery when no stored credential exists", async () => {
@@ -145,12 +146,12 @@ describe("registerOtariProvider", () => {
     const pi = fakePi();
     registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
     await registeredProvider(pi).refreshModels?.({
-      store: {
-        read: async () => undefined,
-        write: async () => {},
-        delete: async () => {},
+      publish: async ({ update }) => {
+        update?.();
+        return true;
       },
       allowNetwork: true,
+      signal: new AbortController().signal,
     });
     expect(fetcher).toHaveBeenCalledTimes(1);
   });

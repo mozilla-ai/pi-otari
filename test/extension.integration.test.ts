@@ -100,7 +100,6 @@ describe("Pi–Otari integration", () => {
       agentDir,
       resourceLoader,
       sessionManager: SessionManager.inMemory(cwd),
-      thinkingLevel: "medium",
     });
     try {
       await session.modelRuntime.refresh({ allowNetwork: true });
@@ -108,6 +107,7 @@ describe("Pi–Otari integration", () => {
       expect(model).toBeDefined();
       if (!model) throw new Error("Expected Otari model");
       await session.setModel(model);
+      session.setThinkingLevel("medium");
       await session.prompt("Reply with done.");
 
       expect(completionPayload?.reasoning_effort).toBe("medium");
@@ -278,6 +278,11 @@ describe("Pi–Otari integration", () => {
       await session.modelRuntime.login("otari", "api_key", {
         prompt: async () => "tk_login_integration",
         notify: () => {},
+      });
+      // Login saves credentials; catalog discovery is a separate operation.
+      await session.modelRuntime.refresh({
+        providers: ["otari"],
+        allowNetwork: true,
       });
       expect(discoveryCount).toBeGreaterThan(0);
       expect(JSON.stringify(session.state.messages)).not.toContain(
