@@ -1,4 +1,4 @@
-import type { Provider } from "@earendil-works/pi-ai";
+import type { Model, Provider } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { loadOtariConfig } from "../src/config.js";
@@ -205,5 +205,37 @@ describe("registerOtariProvider", () => {
     expect(`${model?.baseUrl}/chat/completions`).toBe(
       "https://api.otari.ai/api/v1/chat/completions",
     );
+  });
+
+  it("applies the configured base URL to models cached under an old one", async () => {
+    const cached: Model<"openai-completions"> = {
+      id: "nebius:openai/gpt-oss-120b",
+      name: "nebius:openai/gpt-oss-120b",
+      provider: "otari",
+      api: "openai-completions",
+      baseUrl: "https://api.otari.ai/v1",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128_000,
+      maxTokens: 16_384,
+    };
+    const fetcher = vi.fn();
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
+    const provider = registeredProvider(pi);
+    await provider.refreshModels?.({
+      credential: { type: "api_key", key: "tk_stored" },
+      store: {
+        read: async () => ({ models: [cached], checkedAt: 0 }),
+        write: async () => {},
+        delete: async () => {},
+      },
+      allowNetwork: false,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(provider.getModels()).toEqual([
+      expect.objectContaining({ id: cached.id, baseUrl: config.baseUrl }),
+    ]);
   });
 });
