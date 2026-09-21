@@ -36,7 +36,7 @@ export function createOtariExtension(
       diagnostics: [],
       discoverySource: "none",
     };
-    registerLifecycleUI(pi, () => state);
+    const ui = registerLifecycleUI(pi, () => state);
 
     if (!supportsNativeProviderAuth(dependencies.piVersion ?? VERSION)) {
       state = {
@@ -78,6 +78,7 @@ export function createOtariExtension(
     const { registerOtariProvider } = await import("./provider.js");
     registerOtariProvider(pi, config, [], {
       fetch: dependencies.fetch ?? fetch,
+      onDiagnostic: (diagnostic) => ui.reportDiagnostic(diagnostic),
     });
     state = { ...state, config };
   };

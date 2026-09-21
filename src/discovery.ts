@@ -83,6 +83,60 @@ async function managedFallback(
   }
 }
 
+/** The other well-known Otari API root for this gateway, if the URL uses one. */
+function siblingBaseUrl(baseUrl: string): string | undefined {
+  if (baseUrl.endsWith("/api/v1"))
+    return `${baseUrl.slice(0, -"/api/v1".length)}/v1`;
+  if (baseUrl.endsWith("/v1"))
+    return `${baseUrl.slice(0, -"/v1".length)}/api/v1`;
+  return undefined;
+}
+
+/** True when the gateway answers its public health route under this root. */
+async function servesApiAt(
+  baseUrl: string,
+  config: OtariConfig,
+  fetcher: Fetcher,
+): Promise<boolean> {
+  try {
+    const response = await request(
+      `${baseUrl}/health`,
+      undefined,
+      config.discoveryTimeoutMs,
+      fetcher,
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A 404 from a custom gateway almost always means OTARI_BASE_URL carries the
+ * wrong API prefix: Otari 0.6.0 moved from /v1 to /api/v1. Probe the sibling
+ * root's public health route, without the token, so the message can name the
+ * exact value to set instead of guessing.
+ */
+async function describeNotFound(
+  discoveryUrl: string,
+  config: OtariConfig,
+  fetcher: Fetcher,
+): Promise<Diagnostic> {
+  const sibling = siblingBaseUrl(config.baseUrl);
+  if (sibling && (await servesApiAt(sibling, config, fetcher))) {
+    return {
+      level: "warning",
+      code: "discovery-prefix",
+      message: `Otari model discovery returned HTTP 404 at ${discoveryUrl}; this gateway serves its API at ${sibling}. Set OTARI_BASE_URL=${sibling}`,
+    };
+  }
+  return {
+    level: "warning",
+    code: "discovery-http",
+    message: `Otari model discovery returned HTTP 404 at ${discoveryUrl}; check that OTARI_BASE_URL includes the gateway's API prefix. Otari 0.6.0 and newer use /api/v1`,
+  };
+}
+
 export async function discoverModels(
   config: OtariConfig,
   fetcher: Fetcher = fetch,
@@ -142,6 +196,11 @@ export async function discoverModels(
           },
         ],
       };
+    }
+    if (response.status === 404) {
+      throw new DiscoveryUnavailableError(
+        await describeNotFound(discoveryUrl, config, fetcher),
+      );
     }
     const diagnostic: Diagnostic = {
       level: "warning",

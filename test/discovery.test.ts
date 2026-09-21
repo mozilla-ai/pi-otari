@@ -102,7 +102,9 @@ describe("discoverModels", () => {
   });
 
   it("does not use hosted fallback for a custom endpoint", async () => {
-    const fetcher = vi.fn(async () => response(404, {}));
+    const fetcher = vi.fn(async (_url: string | URL | Request) =>
+      response(404, {}),
+    );
     await expect(
       discoverModels(
         { ...base, baseUrl: "https://self.example/v1", officialHosted: false },
@@ -112,7 +114,9 @@ describe("discoverModels", () => {
       name: "DiscoveryUnavailableError",
       diagnostic: { code: "discovery-http" },
     });
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls.map((call) => String(call[0]))).not.toContain(
+      MANAGED_CATALOG_URL,
+    );
   });
 
   it.each([401, 403])(
@@ -201,5 +205,98 @@ describe("discoverModels", () => {
     expect(result.models).toEqual([]);
     expect(result.diagnostics[0]).toMatchObject({ code: "token-missing" });
     expect(result.diagnostics[0].message).toContain("/login otari");
+  });
+
+  describe("custom 404 prefix detection", () => {
+    const custom = (baseUrl: string): OtariConfig => ({
+      ...base,
+      baseUrl,
+      officialHosted: false,
+    });
+    const gatewayServing = (root: string) =>
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url) === `${root}/health`) {
+          expect(new Headers(init?.headers).get("authorization")).toBeNull();
+          return response(200, { status: "healthy" });
+        }
+        return response(404, { detail: "Not Found" });
+      });
+
+    it("names the /api/v1 root when a /v1 URL hits a current gateway", async () => {
+      const fetcher = gatewayServing("https://self.example/api/v1");
+      await expect(
+        discoverModels(
+          custom("https://self.example/v1"),
+          fetcher as typeof fetch,
+        ),
+      ).rejects.toMatchObject({
+        diagnostic: {
+          code: "discovery-prefix",
+          message: expect.stringContaining(
+            "Set OTARI_BASE_URL=https://self.example/api/v1",
+          ),
+        },
+      });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    });
+
+    it("names the /v1 root when an /api/v1 URL hits an older gateway", async () => {
+      const fetcher = gatewayServing("https://self.example/v1");
+      await expect(
+        discoverModels(
+          custom("https://self.example/api/v1"),
+          fetcher as typeof fetch,
+        ),
+      ).rejects.toMatchObject({
+        diagnostic: {
+          code: "discovery-prefix",
+          message: expect.stringContaining(
+            "Set OTARI_BASE_URL=https://self.example/v1",
+          ),
+        },
+      });
+    });
+
+    it("falls back to a static hint when the probe fails", async () => {
+      const fetcher = vi.fn(async (url: string | URL | Request) => {
+        if (String(url).endsWith("/health"))
+          throw new Error("connection refused");
+        return response(404, {});
+      });
+      await expect(
+        discoverModels(
+          custom("https://self.example/v1"),
+          fetcher as typeof fetch,
+        ),
+      ).rejects.toMatchObject({
+        diagnostic: {
+          code: "discovery-http",
+          message: expect.stringContaining("/api/v1"),
+        },
+      });
+    });
+
+    it("does not probe when the URL has no recognised prefix", async () => {
+      const fetcher = vi.fn(async () => response(404, {}));
+      await expect(
+        discoverModels(
+          custom("https://self.example/gateway"),
+          fetcher as typeof fetch,
+        ),
+      ).rejects.toMatchObject({ diagnostic: { code: "discovery-http" } });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the hosted 404 path to the managed fallback", async () => {
+      const fetcher = vi.fn(async (url: string | URL | Request) =>
+        String(url) === MANAGED_CATALOG_URL
+          ? response(200, { data: [] })
+          : response(404, {}),
+      );
+      await discoverModels(base, fetcher as typeof fetch);
+      expect(fetcher.mock.calls.map((call) => String(call[0]))).not.toContain(
+        "https://api.otari.ai/v1/health",
+      );
+    });
   });
 });

@@ -240,4 +240,34 @@ describe("registerOtariProvider", () => {
       expect.objectContaining({ id: cached.id, baseUrl: config.baseUrl }),
     ]);
   });
+
+  it("reports thrown and returned discovery diagnostics, but not success", async () => {
+    const statuses = [404, 401, 200];
+    const fetcher = vi.fn(async (_url: string | URL | Request) => {
+      const status = statuses.shift() ?? 200;
+      return new Response(JSON.stringify(status === 200 ? { data: [] } : {}), {
+        status,
+      });
+    });
+    const onDiagnostic = vi.fn();
+    const pi = fakePi();
+    registerOtariProvider(
+      pi,
+      {
+        ...config,
+        baseUrl: "https://self.example/gateway",
+        officialHosted: false,
+      },
+      [],
+      { fetch: fetcher as typeof fetch, onDiagnostic },
+    );
+    const provider = registeredProvider(pi);
+    await expect(provider.refreshModels?.(refreshContext())).rejects.toThrow();
+    await provider.refreshModels?.(refreshContext());
+    await provider.refreshModels?.(refreshContext());
+    expect(onDiagnostic.mock.calls.map((call) => call[0].code)).toEqual([
+      "discovery-http",
+      "discovery-auth",
+    ]);
+  });
 });

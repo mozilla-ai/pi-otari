@@ -10,8 +10,8 @@ function harness(state: RuntimeState) {
       handlers.set(name, handler),
     ),
   } as unknown as ExtensionAPI;
-  registerLifecycleUI(pi, () => state);
-  return { handlers };
+  const ui = registerLifecycleUI(pi, () => state);
+  return { handlers, ui };
 }
 
 function context(options?: {
@@ -121,5 +121,47 @@ describe("lifecycle UI", () => {
       "pi-otari",
       "Otari → mzai:model",
     );
+  });
+
+  it("relays a discovery diagnostic through the UI seen at session start", async () => {
+    const { handlers, ui } = harness({
+      models: [],
+      diagnostics: [],
+      discoverySource: "none",
+    });
+    const ctx = context();
+    await handlers.get("session_start")?.({ reason: "startup" }, ctx);
+    ui.reportDiagnostic({
+      level: "warning",
+      code: "discovery-prefix",
+      message: "Set OTARI_BASE_URL=http://localhost:8000/api/v1",
+    });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Set OTARI_BASE_URL=http://localhost:8000/api/v1",
+      "warning",
+    );
+  });
+
+  it("stays silent about discovery when no UI has been seen", () => {
+    const { ui } = harness({
+      models: [],
+      diagnostics: [],
+      discoverySource: "none",
+    });
+    expect(() =>
+      ui.reportDiagnostic({ level: "error", code: "x", message: "m" }),
+    ).not.toThrow();
+  });
+
+  it("stays silent about discovery in a session without a UI", async () => {
+    const { handlers, ui } = harness({
+      models: [],
+      diagnostics: [],
+      discoverySource: "none",
+    });
+    const ctx = { ...context(), hasUI: false };
+    await handlers.get("session_start")?.({ reason: "startup" }, ctx);
+    ui.reportDiagnostic({ level: "error", code: "x", message: "m" });
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 });

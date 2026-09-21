@@ -5,10 +5,10 @@ import {
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { discoverModels } from "./discovery.js";
+import { DiscoveryUnavailableError, discoverModels } from "./discovery.js";
 import { selectorsToModels, toProviderModel } from "./model-mapper.js";
 import { streamOtari } from "./stream-otari.js";
-import type { OtariConfig, OtariModel } from "./types.js";
+import type { Diagnostic, OtariConfig, OtariModel } from "./types.js";
 
 const THINKING_LEVEL_MAP = {
   minimal: "minimal",
@@ -41,6 +41,8 @@ function toRuntimeModel(
 
 export interface ProviderDependencies {
   fetch?: typeof fetch;
+  /** Receives every discovery diagnostic, whether returned or thrown. */
+  onDiagnostic?: (diagnostic: Diagnostic) => void;
 }
 
 export function registerOtariProvider(
@@ -70,17 +72,25 @@ export function registerOtariProvider(
         context.credential?.type === "api_key"
           ? context.credential.key
           : undefined;
-      const result = await discoverModels(
-        {
-          ...config,
-          token: storedToken ?? config.token,
-          environmentModels: [],
-        },
-        dependencies.fetch ?? fetch,
-      );
-      return result.models.map((model) =>
-        toRuntimeModel(model, config.baseUrl),
-      );
+      try {
+        const result = await discoverModels(
+          {
+            ...config,
+            token: storedToken ?? config.token,
+            environmentModels: [],
+          },
+          dependencies.fetch ?? fetch,
+        );
+        for (const diagnostic of result.diagnostics)
+          dependencies.onDiagnostic?.(diagnostic);
+        return result.models.map((model) =>
+          toRuntimeModel(model, config.baseUrl),
+        );
+      } catch (error) {
+        if (error instanceof DiscoveryUnavailableError)
+          dependencies.onDiagnostic?.(error.diagnostic);
+        throw error;
+      }
     },
     api: {
       ...streams,
