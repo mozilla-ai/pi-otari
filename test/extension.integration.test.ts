@@ -111,6 +111,11 @@ describe("Pi–Otari integration", () => {
       expect(model).toBeDefined();
       if (!model) throw new Error("Expected Otari model");
       await session.setModel(model);
+      // The session starts without a model, so its level is "off", and Pi
+      // keeps the current level on a model switch unless settings say
+      // otherwise. Select the level explicitly so the test does not depend on
+      // ambient provider keys giving the session an initial model.
+      session.setThinkingLevel("medium");
       await session.prompt("Reply with done.");
 
       expect(completionPayload?.reasoning_effort).toBe("medium");
