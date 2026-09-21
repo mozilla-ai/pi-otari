@@ -1,11 +1,11 @@
 import {
   type Api,
   type AssistantMessage,
-  type Context,
   createAssistantMessageEventStream,
   type Model,
   openAICompletionsApi,
   type SimpleStreamOptions,
+  type TranscriptContext,
 } from "@earendil-works/pi-ai/compat";
 
 function errorMessage(
@@ -46,7 +46,7 @@ function describeReasoningRejection(
 
 export function streamOtari(
   model: Model<Api>,
-  context: Context,
+  context: TranscriptContext,
   options?: SimpleStreamOptions,
 ) {
   const stream = createAssistantMessageEventStream();

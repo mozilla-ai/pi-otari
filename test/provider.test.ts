@@ -22,6 +22,23 @@ function registeredProvider(pi: ExtensionAPI): Provider {
     .calls[0]?.[0] as unknown as Provider;
 }
 
+type RefreshContext = Parameters<NonNullable<Provider["refreshModels"]>>[0];
+
+/** Minimal refresh context: publications apply immediately, nothing persists. */
+function refreshContext(
+  overrides: Partial<RefreshContext> = {},
+): RefreshContext {
+  return {
+    publish: async (publication) => {
+      publication.update?.();
+      return true;
+    },
+    allowNetwork: true,
+    signal: new AbortController().signal,
+    ...overrides,
+  };
+}
+
 describe("registerOtariProvider", () => {
   it("registers models with discovered reasoning capabilities", () => {
     const pi = fakePi();
@@ -77,6 +94,7 @@ describe("registerOtariProvider", () => {
           return "tk_stored";
         },
         notify: () => {},
+        signal: new AbortController().signal,
       }),
     ).toEqual({ type: "api_key", key: "tk_stored" });
   });
@@ -116,17 +134,16 @@ describe("registerOtariProvider", () => {
     const provider = registeredProvider(pi);
     let storedModels: unknown;
 
-    await provider.refreshModels?.({
-      credential: { type: "api_key", key: "tk_stored" },
-      store: {
-        read: async () => undefined,
-        write: async (entry) => {
-          storedModels = entry.models;
+    await provider.refreshModels?.(
+      refreshContext({
+        credential: { type: "api_key", key: "tk_stored" },
+        publish: async (publication) => {
+          storedModels = publication.persist?.models;
+          publication.update?.();
+          return true;
         },
-        delete: async () => {},
-      },
-      allowNetwork: true,
-    });
+      }),
+    );
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(storedModels).toEqual([
@@ -145,14 +162,7 @@ describe("registerOtariProvider", () => {
     );
     const pi = fakePi();
     registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
-    await registeredProvider(pi).refreshModels?.({
-      store: {
-        read: async () => undefined,
-        write: async () => {},
-        delete: async () => {},
-      },
-      allowNetwork: true,
-    });
+    await registeredProvider(pi).refreshModels?.(refreshContext());
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -191,15 +201,9 @@ describe("registerOtariProvider", () => {
       },
     );
     const provider = registeredProvider(pi);
-    await provider.refreshModels?.({
-      credential: { type: "api_key", key: "tk_default" },
-      store: {
-        read: async () => undefined,
-        write: async () => {},
-        delete: async () => {},
-      },
-      allowNetwork: true,
-    });
+    await provider.refreshModels?.(
+      refreshContext({ credential: { type: "api_key", key: "tk_default" } }),
+    );
     expect(fetcher).toHaveBeenCalledTimes(1);
     const [model] = provider.getModels();
     expect(`${model?.baseUrl}/chat/completions`).toBe(
@@ -224,15 +228,13 @@ describe("registerOtariProvider", () => {
     const pi = fakePi();
     registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
     const provider = registeredProvider(pi);
-    await provider.refreshModels?.({
-      credential: { type: "api_key", key: "tk_stored" },
-      store: {
-        read: async () => ({ models: [cached], checkedAt: 0 }),
-        write: async () => {},
-        delete: async () => {},
-      },
-      allowNetwork: false,
-    });
+    await provider.refreshModels?.(
+      refreshContext({
+        credential: { type: "api_key", key: "tk_stored" },
+        stored: { models: [cached], checkedAt: 0 },
+        allowNetwork: false,
+      }),
+    );
     expect(fetcher).not.toHaveBeenCalled();
     expect(provider.getModels()).toEqual([
       expect.objectContaining({ id: cached.id, baseUrl: config.baseUrl }),
