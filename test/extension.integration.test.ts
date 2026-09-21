@@ -55,14 +55,17 @@ describe("Pi–Otari integration", () => {
     let completionCount = 0;
     let completionPayload: Record<string, unknown> | undefined;
     const server = createServer(async (request, response) => {
-      if (request.method === "GET" && request.url === "/v1/models") {
+      if (request.method === "GET" && request.url === "/api/v1/models") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({ data: [{ id: "test-model", reasoning: true }] }),
         );
         return;
       }
-      if (request.method === "POST" && request.url === "/v1/chat/completions") {
+      if (
+        request.method === "POST" &&
+        request.url === "/api/v1/chat/completions"
+      ) {
         completionCount += 1;
         completionPayload = await body(request);
         response.writeHead(400, { "content-type": "application/json" });
@@ -86,7 +89,7 @@ describe("Pi–Otari integration", () => {
       throw new Error("Expected TCP server");
 
     vi.stubEnv("OTARI_API_KEY", "tk_integration");
-    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/v1`);
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/api/v1`);
     const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-integration-"));
     const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
     const resourceLoader = new DefaultResourceLoader({
@@ -108,6 +111,11 @@ describe("Pi–Otari integration", () => {
       expect(model).toBeDefined();
       if (!model) throw new Error("Expected Otari model");
       await session.setModel(model);
+      // The session starts without a model, so its level is "off", and Pi
+      // keeps the current level on a model switch unless settings say
+      // otherwise. Select the level explicitly so the test does not depend on
+      // ambient provider keys giving the session an initial model.
+      session.setThinkingLevel("medium");
       await session.prompt("Reply with done.");
 
       expect(completionPayload?.reasoning_effort).toBe("medium");
@@ -139,12 +147,15 @@ describe("Pi–Otari integration", () => {
     let completionCount = 0;
     const server = createServer(async (request, response) => {
       expect(request.headers.authorization).toBe("Bearer tk_integration");
-      if (request.method === "GET" && request.url === "/v1/models") {
+      if (request.method === "GET" && request.url === "/api/v1/models") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ data: [{ id: "test-model" }] }));
         return;
       }
-      if (request.method === "POST" && request.url === "/v1/chat/completions") {
+      if (
+        request.method === "POST" &&
+        request.url === "/api/v1/chat/completions"
+      ) {
         completionCount += 1;
         const payload = await body(request);
         expect(payload.model).toBe("test-model");
@@ -181,7 +192,7 @@ describe("Pi–Otari integration", () => {
       throw new Error("Expected TCP server");
 
     vi.stubEnv("OTARI_API_KEY", "tk_integration");
-    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/v1`);
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/api/v1`);
     const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-integration-"));
     const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
     const resourceLoader = new DefaultResourceLoader({
@@ -232,13 +243,16 @@ describe("Pi–Otari integration", () => {
     let completionCount = 0;
     const server = createServer(async (request, response) => {
       expect(request.headers.authorization).toBe("Bearer tk_login_integration");
-      if (request.method === "GET" && request.url === "/v1/models") {
+      if (request.method === "GET" && request.url === "/api/v1/models") {
         discoveryCount += 1;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ data: [{ id: "mzai:test-model" }] }));
         return;
       }
-      if (request.method === "POST" && request.url === "/v1/chat/completions") {
+      if (
+        request.method === "POST" &&
+        request.url === "/api/v1/chat/completions"
+      ) {
         completionCount += 1;
         sse(response, [
           toolChunk({ role: "assistant", content: "done" }),
@@ -255,7 +269,7 @@ describe("Pi–Otari integration", () => {
       throw new Error("Expected TCP server");
 
     vi.stubEnv("OTARI_API_KEY", "");
-    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/v1`);
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/api/v1`);
     const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-login-"));
     const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
     const resourceLoader = new DefaultResourceLoader({
@@ -279,6 +293,9 @@ describe("Pi–Otari integration", () => {
         prompt: async () => "tk_login_integration",
         notify: () => {},
       });
+      // Since Pi 0.86 login only stores the credential; the /login command
+      // then refreshes the provider's catalog as a separate step.
+      await session.modelRuntime.refresh({ allowNetwork: true });
       expect(discoveryCount).toBeGreaterThan(0);
       expect(JSON.stringify(session.state.messages)).not.toContain(
         "tk_login_integration",

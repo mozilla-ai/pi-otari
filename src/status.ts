@@ -2,7 +2,16 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { RuntimeState } from "./types.js";
+import type { Diagnostic, RuntimeState } from "./types.js";
+
+export interface LifecycleUI {
+  /**
+   * Show a discovery diagnostic through the UI captured from the most recent
+   * session event. Pi reports a failed provider refresh as "Could not refresh
+   * otari" without the underlying message, so the extension has to relay it.
+   */
+  reportDiagnostic(diagnostic: Diagnostic): void;
+}
 
 function updateStatus(
   ctx: ExtensionContext,
@@ -28,12 +37,19 @@ async function isOtariConfigured(ctx: ExtensionContext): Promise<boolean> {
 export function registerLifecycleUI(
   pi: ExtensionAPI,
   getState: () => RuntimeState,
-): void {
+): LifecycleUI {
+  let ui: ExtensionContext["ui"] | undefined;
+  const captureUI = (ctx: ExtensionContext) => {
+    ui = ctx.hasUI ? ctx.ui : undefined;
+  };
+
   pi.on("model_select", (event, ctx) => {
+    captureUI(ctx);
     updateStatus(ctx, event.model.provider, event.model.id);
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    captureUI(ctx);
     updateStatus(ctx, ctx.model?.provider, ctx.model?.id);
     if (!ctx.hasUI) return;
 
@@ -43,8 +59,8 @@ export function registerLifecycleUI(
       return;
     }
 
-    // Discovery diagnostics are surfaced natively by Pi's model refresh, which
-    // runs after this event. The one thing we can check reliably at startup is
+    // Discovery diagnostics arrive later through reportDiagnostic, once Pi
+    // refreshes the catalog. The one thing we can check reliably at startup is
     // whether any credential (stored via /login or OTARI_API_KEY) exists.
     if (!(await isOtariConfigured(ctx))) {
       ctx.ui.notify(
@@ -54,4 +70,10 @@ export function registerLifecycleUI(
       );
     }
   });
+
+  return {
+    reportDiagnostic(diagnostic) {
+      ui?.notify(diagnostic.message, diagnostic.level);
+    },
+  };
 }

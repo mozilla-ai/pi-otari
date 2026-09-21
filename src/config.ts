@@ -1,6 +1,7 @@
 import type { OtariConfig } from "./types.js";
 
-const DEFAULT_BASE_URL = "https://api.otari.ai/v1";
+const DEFAULT_BASE_URL = "https://api.otari.ai/api/v1";
+const HOSTED_HOSTNAME = new URL(DEFAULT_BASE_URL).hostname;
 const DEFAULT_TIMEOUT_MS = 5000;
 const LOOPBACK_HOSTS = new Set(["localhost", "::1", "[::1]"]);
 const IPV4_LOOPBACK_PATTERN = /^127(?:\.\d{1,3}){3}$/;
@@ -68,10 +69,23 @@ function parseBaseUrl(value: string | undefined): {
     );
   }
   const baseUrl = url.toString().replace(/\/+$/, "");
-  return {
-    baseUrl,
-    officialHosted: baseUrl === DEFAULT_BASE_URL,
-  };
+  // Pi appends /chat/completions and discovery appends /models, so the value
+  // must carry the gateway's API prefix; no Otari gateway serves those at the
+  // origin. Otari's own docs tell OpenAI-style clients the same thing.
+  if (baseUrl === url.origin) {
+    throw new ConfigError(
+      `OTARI_BASE_URL must include the API prefix, for example ${url.origin}/api/v1`,
+    );
+  }
+  const officialHosted = url.hostname === HOSTED_HOSTNAME;
+  // Hosted Otari has exactly one API root. Anything else on that host, such as
+  // the retired /v1 prefix, would fail every request, so say so at startup.
+  if (officialHosted && baseUrl !== DEFAULT_BASE_URL) {
+    throw new ConfigError(
+      `Hosted Otari serves its API at ${DEFAULT_BASE_URL}; set OTARI_BASE_URL to that URL or leave it unset`,
+    );
+  }
+  return { baseUrl, officialHosted };
 }
 
 export function loadOtariConfig(

@@ -1,11 +1,12 @@
-import type { Provider } from "@earendil-works/pi-ai";
+import type { Model, Provider } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
+import { loadOtariConfig } from "../src/config.js";
 import { registerOtariProvider } from "../src/provider.js";
 import type { OtariConfig } from "../src/types.js";
 
 const config: OtariConfig = {
-  baseUrl: "https://api.otari.ai/v1",
+  baseUrl: "https://api.otari.ai/api/v1",
   token: "tk_not_forwarded_to_registration",
   discoveryTimeoutMs: 5000,
   environmentModels: [],
@@ -19,6 +20,23 @@ function fakePi(): ExtensionAPI {
 function registeredProvider(pi: ExtensionAPI): Provider {
   return vi.mocked(pi.registerProvider).mock
     .calls[0]?.[0] as unknown as Provider;
+}
+
+type RefreshContext = Parameters<NonNullable<Provider["refreshModels"]>>[0];
+
+/** Minimal refresh context: publications apply immediately, nothing persists. */
+function refreshContext(
+  overrides: Partial<RefreshContext> = {},
+): RefreshContext {
+  return {
+    publish: async (publication) => {
+      publication.update?.();
+      return true;
+    },
+    allowNetwork: true,
+    signal: new AbortController().signal,
+    ...overrides,
+  };
 }
 
 describe("registerOtariProvider", () => {
@@ -76,6 +94,7 @@ describe("registerOtariProvider", () => {
           return "tk_stored";
         },
         notify: () => {},
+        signal: new AbortController().signal,
       }),
     ).toEqual({ type: "api_key", key: "tk_stored" });
   });
@@ -115,17 +134,16 @@ describe("registerOtariProvider", () => {
     const provider = registeredProvider(pi);
     let storedModels: unknown;
 
-    await provider.refreshModels?.({
-      credential: { type: "api_key", key: "tk_stored" },
-      store: {
-        read: async () => undefined,
-        write: async (entry) => {
-          storedModels = entry.models;
+    await provider.refreshModels?.(
+      refreshContext({
+        credential: { type: "api_key", key: "tk_stored" },
+        publish: async (publication) => {
+          storedModels = publication.persist?.models;
+          publication.update?.();
+          return true;
         },
-        delete: async () => {},
-      },
-      allowNetwork: true,
-    });
+      }),
+    );
 
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(storedModels).toEqual([
@@ -144,14 +162,7 @@ describe("registerOtariProvider", () => {
     );
     const pi = fakePi();
     registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
-    await registeredProvider(pi).refreshModels?.({
-      store: {
-        read: async () => undefined,
-        write: async () => {},
-        delete: async () => {},
-      },
-      allowNetwork: true,
-    });
+    await registeredProvider(pi).refreshModels?.(refreshContext());
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -170,5 +181,93 @@ describe("registerOtariProvider", () => {
         }),
       }),
     );
+  });
+
+  it("targets hosted /api/v1 for both discovery and inference by default", async () => {
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe("https://api.otari.ai/api/v1/models");
+      return new Response(
+        JSON.stringify({ data: [{ id: "nebius:openai/gpt-oss-120b" }] }),
+        { status: 200 },
+      );
+    });
+    const pi = fakePi();
+    registerOtariProvider(
+      pi,
+      loadOtariConfig({ OTARI_API_KEY: "tk_default" }),
+      [],
+      {
+        fetch: fetcher as typeof fetch,
+      },
+    );
+    const provider = registeredProvider(pi);
+    await provider.refreshModels?.(
+      refreshContext({ credential: { type: "api_key", key: "tk_default" } }),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const [model] = provider.getModels();
+    expect(`${model?.baseUrl}/chat/completions`).toBe(
+      "https://api.otari.ai/api/v1/chat/completions",
+    );
+  });
+
+  it("applies the configured base URL to models cached under an old one", async () => {
+    const cached: Model<"openai-completions"> = {
+      id: "nebius:openai/gpt-oss-120b",
+      name: "nebius:openai/gpt-oss-120b",
+      provider: "otari",
+      api: "openai-completions",
+      baseUrl: "https://api.otari.ai/v1",
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128_000,
+      maxTokens: 16_384,
+    };
+    const fetcher = vi.fn();
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
+    const provider = registeredProvider(pi);
+    await provider.refreshModels?.(
+      refreshContext({
+        credential: { type: "api_key", key: "tk_stored" },
+        stored: { models: [cached], checkedAt: 0 },
+        allowNetwork: false,
+      }),
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(provider.getModels()).toEqual([
+      expect.objectContaining({ id: cached.id, baseUrl: config.baseUrl }),
+    ]);
+  });
+
+  it("reports thrown and returned discovery diagnostics, but not success", async () => {
+    const statuses = [404, 401, 200];
+    const fetcher = vi.fn(async (_url: string | URL | Request) => {
+      const status = statuses.shift() ?? 200;
+      return new Response(JSON.stringify(status === 200 ? { data: [] } : {}), {
+        status,
+      });
+    });
+    const onDiagnostic = vi.fn();
+    const pi = fakePi();
+    registerOtariProvider(
+      pi,
+      {
+        ...config,
+        baseUrl: "https://self.example/gateway",
+        officialHosted: false,
+      },
+      [],
+      { fetch: fetcher as typeof fetch, onDiagnostic },
+    );
+    const provider = registeredProvider(pi);
+    await expect(provider.refreshModels?.(refreshContext())).rejects.toThrow();
+    await provider.refreshModels?.(refreshContext());
+    await provider.refreshModels?.(refreshContext());
+    expect(onDiagnostic.mock.calls.map((call) => call[0].code)).toEqual([
+      "discovery-http",
+      "discovery-auth",
+    ]);
   });
 });

@@ -1,7 +1,7 @@
 const token = process.env.OTARI_LIVE_TEST_TOKEN;
 const model = process.env.OTARI_LIVE_TEST_MODEL;
 const baseUrl = (
-  process.env.OTARI_LIVE_TEST_BASE_URL ?? "https://api.otari.ai/v1"
+  process.env.OTARI_LIVE_TEST_BASE_URL ?? "https://api.otari.ai/api/v1"
 ).replace(/\/+$/, "");
 
 if (!token || !model) {

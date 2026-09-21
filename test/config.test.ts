@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadOtariConfig } from "../src/config.js";
 
-const hosted = "https://api.otari.ai/v1";
+const hosted = "https://api.otari.ai/api/v1";
 
 describe("loadOtariConfig", () => {
   it("uses hosted defaults and trims model selectors", () => {
@@ -30,8 +30,8 @@ describe("loadOtariConfig", () => {
     "http://otari.example.com/v1",
     "ftp://localhost/v1",
     "https://user:pass@otari.example.com/v1",
-    "https://api.otari.ai/v1?workspace=other",
-    "https://api.otari.ai/v1#fragment",
+    "https://api.otari.ai/api/v1?workspace=other",
+    "https://api.otari.ai/api/v1#fragment",
   ])("rejects unsafe URL %s", (baseUrl) => {
     expect(() => loadOtariConfig({ OTARI_BASE_URL: baseUrl })).toThrow(
       ConfigError,
@@ -43,4 +43,39 @@ describe("loadOtariConfig", () => {
       loadOtariConfig({ OTARI_DISCOVERY_TIMEOUT_MS: value }),
     ).toThrow(ConfigError);
   });
+
+  it.each([
+    "https://otari.example.com",
+    "https://otari.example.com/",
+    "http://localhost:8000",
+    "https://api.otari.ai",
+  ])("rejects origin-only URL %s", (baseUrl) => {
+    const load = () => loadOtariConfig({ OTARI_BASE_URL: baseUrl });
+    expect(load).toThrow(ConfigError);
+    expect(load).toThrow(/API prefix.*\/api\/v1$/);
+  });
+
+  it("detects hosted Otari by hostname", () => {
+    expect(
+      loadOtariConfig({ OTARI_BASE_URL: "https://api.otari.ai/api/v1/" }),
+    ).toMatchObject({ baseUrl: hosted, officialHosted: true });
+  });
+
+  it("treats other hosts as custom whatever their prefix", () => {
+    expect(
+      loadOtariConfig({ OTARI_BASE_URL: "https://self.example/v1" }),
+    ).toMatchObject({
+      baseUrl: "https://self.example/v1",
+      officialHosted: false,
+    });
+  });
+
+  it.each(["https://api.otari.ai/v1", "https://api.otari.ai/api/v2"])(
+    "rejects hosted URL %s that is not the current API root",
+    (baseUrl) => {
+      const load = () => loadOtariConfig({ OTARI_BASE_URL: baseUrl });
+      expect(load).toThrow(ConfigError);
+      expect(load).toThrow("https://api.otari.ai/api/v1");
+    },
+  );
 });
