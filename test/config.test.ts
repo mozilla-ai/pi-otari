@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadOtariConfig } from "../src/config.js";
 
-const hosted = "https://api.otari.ai/v1";
+const hosted = "https://api.otari.ai/api/v1";
 
 describe("loadOtariConfig", () => {
   it("uses hosted defaults and trims model selectors", () => {
@@ -30,8 +30,8 @@ describe("loadOtariConfig", () => {
     "http://otari.example.com/v1",
     "ftp://localhost/v1",
     "https://user:pass@otari.example.com/v1",
-    "https://api.otari.ai/v1?workspace=other",
-    "https://api.otari.ai/v1#fragment",
+    "https://api.otari.ai/api/v1?workspace=other",
+    "https://api.otari.ai/api/v1#fragment",
   ])("rejects unsafe URL %s", (baseUrl) => {
     expect(() => loadOtariConfig({ OTARI_BASE_URL: baseUrl })).toThrow(
       ConfigError,

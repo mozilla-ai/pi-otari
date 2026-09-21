@@ -51,7 +51,7 @@
 
 6. Send a prompt normally. No Otari-specific slash command is required. When an Otari model is selected, Pi's status area shows `Otari → <model-id>`.
 
-Pi sends requests for the selected provider to `https://api.otari.ai/v1/chat/completions`. Local Pi tools continue to run according to your Pi configuration.
+Pi sends requests for the selected provider to `https://api.otari.ai/api/v1/chat/completions`. Local Pi tools continue to run according to your Pi configuration.
 
 To inspect the Otari models available to Pi from a shell, run:
 
@@ -111,7 +111,7 @@ HTTP is accepted only for loopback development endpoints.
 | Variable | Default | Description |
 |---|---|---|
 | `OTARI_API_KEY` | none | Workspace token or standalone key fallback when no stored credential exists |
-| `OTARI_BASE_URL` | `https://api.otari.ai/v1` | OpenAI-compatible base URL |
+| `OTARI_BASE_URL` | `https://api.otari.ai/api/v1` | OpenAI-compatible base URL |
 | `OTARI_DISCOVERY_TIMEOUT_MS` | `5000` | Discovery timeout from 1000 to 30000 ms |
 | `OTARI_MODELS` | none | Conditional fallback or additional model selectors |
 

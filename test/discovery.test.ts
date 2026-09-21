@@ -1,13 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  discoverModels,
-  HOSTED_MODELS_URL,
-  MANAGED_CATALOG_URL,
-} from "../src/discovery.js";
+import { discoverModels, MANAGED_CATALOG_URL } from "../src/discovery.js";
 import type { OtariConfig } from "../src/types.js";
 
 const base: OtariConfig = {
-  baseUrl: "https://api.otari.ai/v1",
+  baseUrl: "https://api.otari.ai/api/v1",
   token: "tk_secret",
   discoveryTimeoutMs: 5000,
   environmentModels: [],
@@ -24,7 +20,7 @@ describe("discoverModels", () => {
   it("uses hosted workspace discovery and sends bearer auth", async () => {
     const fetcher = vi.fn(
       async (url: string | URL | Request, init?: RequestInit) => {
-        expect(String(url)).toBe(HOSTED_MODELS_URL);
+        expect(String(url)).toBe("https://api.otari.ai/api/v1/models");
         expect(new Headers(init?.headers).get("authorization")).toBe(
           "Bearer tk_secret",
         );

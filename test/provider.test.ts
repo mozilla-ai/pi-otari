@@ -1,11 +1,12 @@
 import type { Provider } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
+import { loadOtariConfig } from "../src/config.js";
 import { registerOtariProvider } from "../src/provider.js";
 import type { OtariConfig } from "../src/types.js";
 
 const config: OtariConfig = {
-  baseUrl: "https://api.otari.ai/v1",
+  baseUrl: "https://api.otari.ai/api/v1",
   token: "tk_not_forwarded_to_registration",
   discoveryTimeoutMs: 5000,
   environmentModels: [],
@@ -169,6 +170,40 @@ describe("registerOtariProvider", () => {
           }),
         }),
       }),
+    );
+  });
+
+  it("targets hosted /api/v1 for both discovery and inference by default", async () => {
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe("https://api.otari.ai/api/v1/models");
+      return new Response(
+        JSON.stringify({ data: [{ id: "nebius:openai/gpt-oss-120b" }] }),
+        { status: 200 },
+      );
+    });
+    const pi = fakePi();
+    registerOtariProvider(
+      pi,
+      loadOtariConfig({ OTARI_API_KEY: "tk_default" }),
+      [],
+      {
+        fetch: fetcher as typeof fetch,
+      },
+    );
+    const provider = registeredProvider(pi);
+    await provider.refreshModels?.({
+      credential: { type: "api_key", key: "tk_default" },
+      store: {
+        read: async () => undefined,
+        write: async () => {},
+        delete: async () => {},
+      },
+      allowNetwork: true,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const [model] = provider.getModels();
+    expect(`${model?.baseUrl}/chat/completions`).toBe(
+      "https://api.otari.ai/api/v1/chat/completions",
     );
   });
 });

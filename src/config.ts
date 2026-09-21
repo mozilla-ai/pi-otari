@@ -1,6 +1,6 @@
 import type { OtariConfig } from "./types.js";
 
-const DEFAULT_BASE_URL = "https://api.otari.ai/v1";
+const DEFAULT_BASE_URL = "https://api.otari.ai/api/v1";
 const DEFAULT_TIMEOUT_MS = 5000;
 const LOOPBACK_HOSTS = new Set(["localhost", "::1", "[::1]"]);
 const IPV4_LOOPBACK_PATTERN = /^127(?:\.\d{1,3}){3}$/;
