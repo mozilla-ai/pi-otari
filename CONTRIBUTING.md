@@ -58,7 +58,47 @@ OTARI_MODELS=<model id> pi --no-extensions -e ./src/index.ts --no-session -p \
   --model "otari/<model id>" "Reply with exactly: ok"
 ```
 
-`npm run test:live` sends a single request straight to a gateway. Set `OTARI_LIVE_TEST_TOKEN` and `OTARI_LIVE_TEST_MODEL`, and `OTARI_LIVE_TEST_BASE_URL` to target a local gateway. Pick a plain instruct model: the request allows only a few output tokens, which reasoning models spend before producing text.
+
+## Check compatibility with a live gateway
+
+`npm run test:live` runs the extension against a real Otari gateway and stops at the first failing stage, printing the gateway's own reason where there is one. It sends two requests to the model list and two completions capped at the output bound. Run it before requesting review when a change touches discovery, the provider, streaming, or URL handling; the offline suite behind `npm run check` needs no credentials and is what CI runs.
+
+The stages, in order:
+
+1. **configuration**: the variables below are read and validated.
+2. **extension loads in a Pi session**: Pi loads `src/index.ts` by path, the way `pi -e` does, into a session whose state lives in temporary directories. Fails when the extension rejects its configuration and registers no provider.
+3. **model discovery through the extension**: Pi refreshes the Otari catalog over the network. Fails with the extension's own diagnostic, or when the configured model is missing from the list, naming the current selector when the same model is listed under another prefix. Also reports which capability fields Otari returned for the model and what Pi registered.
+4. **non-streaming completion**: one plain request outside Pi. Otari's reason for a rejection travels in a `detail` field that Pi's client does not display, so this stage shows it.
+5. **streaming completion through Pi**: one prompt through Pi's agent loop, the extension's stream wrapper, and pi-ai's streaming client, with the model's output capped at the configured bound. Fails on an error reply, a truncated reply, or more than one request for the prompt.
+
+| Variable | Default | Description |
+|---|---|---|
+| `OTARI_LIVE_TEST_TOKEN` | required | API key for the gateway under test. Use a disposable key. |
+| `OTARI_LIVE_TEST_MODEL` | required | A selector that gateway lists. Prefer an instruct model: reasoning models spend the output cap before producing text. |
+| `OTARI_LIVE_TEST_BASE_URL` | `https://api.otari.ai/api/v1` | Gateway URL including its API prefix. |
+| `OTARI_LIVE_TEST_MAX_TOKENS` | `8` | Output cap for both completions. |
+| `OTARI_LIVE_TEST_REASONING` | unset | One of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Otari does not yet mark models as reasoning-capable, so the run marks the selected model itself and sends the level. Raise the output cap alongside it. |
+
+Against hosted Otari:
+
+```bash
+OTARI_LIVE_TEST_TOKEN=your_otari_key \
+OTARI_LIVE_TEST_MODEL=nebius:Qwen/Qwen3-30B-A3B-Instruct-2507 \
+npm run test:live
+```
+
+Against a gateway on your machine, with a reasoning model:
+
+```bash
+OTARI_LIVE_TEST_TOKEN=your_local_key \
+OTARI_LIVE_TEST_BASE_URL=http://localhost:8000/api/v1 \
+OTARI_LIVE_TEST_MODEL=llamafile:qwen3.8-flash-next-reasoner \
+OTARI_LIVE_TEST_REASONING=low \
+OTARI_LIVE_TEST_MAX_TOKENS=512 \
+npm run test:live
+```
+
+The script places the live token and URL in its own environment before Pi loads the extension and ignores `OTARI_MODELS`, so the `OTARI_*` variables in your shell do not affect the run. Nothing under `~/.pi` is read or written.
 
 ## Change dependencies
 
@@ -69,6 +109,7 @@ Use `npm install` when adding, removing, or upgrading dependencies, and commit b
 - Keep changes focused on one concern.
 - Do not commit API keys or other credentials.
 - Include tests or documentation when behavior changes.
+- For a change to discovery, the provider, streaming, or URL handling, run `npm run test:live` against hosted Otari, and against a self-hosted gateway if you have one, and paste its `ok -` lines in the pull request description.
 - Confirm the `Validate package` GitHub Actions job passes.
 
 ## Release a version
