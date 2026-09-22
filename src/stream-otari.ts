@@ -7,6 +7,12 @@ import {
   type SimpleStreamOptions,
   type TranscriptContext,
 } from "@earendil-works/pi-ai/compat";
+import {
+  type Catalog,
+  describeStale,
+  isStale,
+  replacementsFor,
+} from "./staleness.js";
 
 function errorMessage(
   model: Model<"openai-completions">,
@@ -44,54 +50,91 @@ function describeReasoningRejection(
   ].join("\n\n");
 }
 
-export function streamOtari(
-  model: Model<Api>,
-  context: TranscriptContext,
-  options?: SimpleStreamOptions,
-) {
-  const stream = createAssistantMessageEventStream();
-  const openAIModel = model as Model<"openai-completions">;
+/**
+ * Explain a gateway error for a selector missing from the last discovered
+ * list. Otari's own rejections carry their reason in a `detail` field, which
+ * the OpenAI client reduces to "<status> status code (no body)", so the
+ * discovered list is what tells the user what to do. The gateway's text
+ * follows the explanation.
+ */
+export function explainGatewayError(
+  id: string,
+  message: string,
+  catalog: Catalog,
+  baseUrl: string,
+): string | undefined {
+  if (!isStale(catalog, id)) return undefined;
+  return [
+    describeStale(id, baseUrl, replacementsFor(id, catalog)),
+    message,
+  ].join("\n\n");
+}
 
-  (async () => {
-    try {
-      const attempt = openAICompletionsApi().streamSimple(
-        openAIModel,
-        context,
-        options,
-      );
-      for await (const event of attempt) {
-        if (
-          event.type === "error" &&
-          options?.reasoning &&
-          /reasoning[_\s-]?effort|reasoning level|thinking level/i.test(
-            event.error.errorMessage ?? "",
-          )
-        ) {
-          stream.push({
-            ...event,
-            error: {
-              ...event.error,
-              errorMessage: describeReasoningRejection(
-                openAIModel,
-                options.reasoning,
-                event.error.errorMessage ?? "Unknown Otari error",
-              ),
-            },
-          });
-        } else {
-          stream.push(event);
+export function createStreamOtari(catalog: Catalog, baseUrl: string) {
+  return function streamOtari(
+    model: Model<Api>,
+    context: TranscriptContext,
+    options?: SimpleStreamOptions,
+  ) {
+    const stream = createAssistantMessageEventStream();
+    const openAIModel = model as Model<"openai-completions">;
+
+    (async () => {
+      try {
+        const attempt = openAICompletionsApi().streamSimple(
+          openAIModel,
+          context,
+          options,
+        );
+        for await (const event of attempt) {
+          if (event.type !== "error") {
+            stream.push(event);
+            continue;
+          }
+          const message = event.error.errorMessage ?? "Unknown Otari error";
+          const explanation = explainGatewayError(
+            openAIModel.id,
+            message,
+            catalog,
+            baseUrl,
+          );
+          if (explanation) {
+            stream.push({
+              ...event,
+              error: { ...event.error, errorMessage: explanation },
+            });
+          } else if (
+            options?.reasoning &&
+            /reasoning[_\s-]?effort|reasoning level|thinking level/i.test(
+              message,
+            )
+          ) {
+            stream.push({
+              ...event,
+              error: {
+                ...event.error,
+                errorMessage: describeReasoningRejection(
+                  openAIModel,
+                  options.reasoning,
+                  message,
+                ),
+              },
+            });
+          } else {
+            stream.push(event);
+          }
         }
+        stream.end();
+      } catch (error) {
+        stream.push({
+          type: "error",
+          reason: "error",
+          error: errorMessage(openAIModel, error),
+        });
+        stream.end();
       }
-      stream.end();
-    } catch (error) {
-      stream.push({
-        type: "error",
-        reason: "error",
-        error: errorMessage(openAIModel, error),
-      });
-      stream.end();
-    }
-  })();
+    })();
 
-  return stream;
+    return stream;
+  };
 }

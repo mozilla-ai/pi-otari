@@ -13,7 +13,7 @@ import {
   isStale,
   replacementsFor,
 } from "./staleness.js";
-import { streamOtari } from "./stream-otari.js";
+import { createStreamOtari } from "./stream-otari.js";
 import type { Diagnostic, OtariConfig, OtariModel } from "./types.js";
 
 const THINKING_LEVEL_MAP = {
@@ -152,7 +152,7 @@ export function registerOtariProvider(
     },
     api: {
       ...streams,
-      streamSimple: streamOtari,
+      streamSimple: createStreamOtari(catalog, config.baseUrl),
     },
   });
   pi.registerProvider({
