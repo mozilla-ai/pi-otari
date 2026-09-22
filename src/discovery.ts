@@ -164,7 +164,7 @@ export async function discoverModels(
       throw new DiscoveryUnavailableError({
         level: "error",
         code: "discovery-auth",
-        message: `Otari model discovery returned HTTP ${response.status}; run /login otari with a valid key or update OTARI_API_KEY, then confirm workspace access`,
+        message: `Otari model discovery returned HTTP ${response.status}. Run /login otari with a valid key, or set OTARI_API_KEY (after /logout otari if a key is saved); then confirm workspace access`,
       });
     }
     if (response.status === 404) {
