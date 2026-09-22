@@ -363,6 +363,30 @@ describe("registerOtariProvider", () => {
     ]);
   });
 
+  it("keeps an OTARI_MODELS entry whose id matches a model cached from another origin", async () => {
+    const pi = fakePi();
+    registerOtariProvider(
+      pi,
+      {
+        ...config,
+        baseUrl: "https://otari.example.com/api/v1",
+        officialHosted: false,
+        environmentModels: ["nebius:test-model"],
+      },
+      [],
+    );
+    const provider = registeredProvider(pi);
+    await restoreCached(provider, [
+      cachedModel("https://api.otari.ai/api/v1", "nebius:test-model"),
+    ]);
+    expect(provider.getModels()).toEqual([
+      expect.objectContaining({
+        id: "nebius:test-model",
+        baseUrl: "https://otari.example.com/api/v1",
+      }),
+    ]);
+  });
+
   it("seeds the catalog from the stored list of this deployment", async () => {
     const catalog = new Set<string>();
     const pi = fakePi();

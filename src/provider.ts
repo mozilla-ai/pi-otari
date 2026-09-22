@@ -56,11 +56,13 @@ function originOf(url: string): string | undefined {
 
 /**
  * Pi persists discovered models with the base URL they were discovered from
- * and serves them from that cache before any network refresh. A cached entry
- * is only evidence about that deployment: after OTARI_BASE_URL moves to a
- * different origin, keep nothing from the previous one. Entries from the same
- * origin under another prefix are considered as the same deployment after
- * an API move (Otari 0.6.0: /v1 to /api/v1) and follow the configured URL.
+ * and restores them before any network refresh, merged over the OTARI_MODELS
+ * baseline by id. A cached entry is only evidence about that deployment: after
+ * OTARI_BASE_URL moves to a different origin, keep nothing from the previous
+ * one. The stored list is scoped before that merge, so an OTARI_MODELS entry
+ * with the same id stays as configured. Entries from the same origin under
+ * another prefix are considered as the same deployment after an API move
+ * (Otari 0.6.0: /v1 to /api/v1) and follow the configured URL.
  */
 function scopeToBackend<T extends { baseUrl: string }>(
   models: readonly T[],
@@ -157,21 +159,23 @@ export function registerOtariProvider(
   });
   pi.registerProvider({
     ...provider,
-    getModels: () => scopeToBackend(provider.getModels(), config.baseUrl),
-    // Pi restores the persisted list before any network access, and that list
-    // is the last successful discovery. Seed the catalog from it so selectors
-    // can be checked from session start, with the network refresh taking over
-    // once it answers.
+    // Scope the stored list to this deployment before createProvider restores
+    // it, and seed the catalog from the same list: it is the last successful
+    // discovery, so selectors can be checked from session start, with the
+    // network refresh taking over once it answers.
     refreshModels: async (context) => {
-      if (context.stored) {
-        const restored = scopeToBackend(
+      const stored = context.stored && {
+        ...context.stored,
+        models: scopeToBackend(
           context.stored.models.filter((model) => model.provider === "otari"),
           config.baseUrl,
-        );
+        ),
+      };
+      if (stored) {
         catalog.clear();
-        for (const model of restored) catalog.add(model.id);
+        for (const model of stored.models) catalog.add(model.id);
       }
-      return provider.refreshModels?.(context);
+      return provider.refreshModels?.({ ...context, stored });
     },
   });
   return true;
