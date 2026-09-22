@@ -362,4 +362,109 @@ describe("registerOtariProvider", () => {
       expect.objectContaining({ id: cached.id }),
     ]);
   });
+
+  it("seeds the catalog from the stored list of this deployment", async () => {
+    const catalog = new Set<string>();
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], { catalog });
+    await restoreCached(registeredProvider(pi), [
+      cachedModel(config.baseUrl, "nebius:openai/gpt-oss-120b"),
+      cachedModel("https://otari.example.com/api/v1", "other:model"),
+    ]);
+    expect([...catalog]).toEqual(["nebius:openai/gpt-oss-120b"]);
+  });
+
+  it("replaces the catalog on each discovery and clears it on an empty one", async () => {
+    const bodies = [
+      { data: [{ id: "nebius:openai/gpt-oss-120b" }] },
+      { data: [] },
+    ];
+    const fetcher = vi.fn(
+      async () => new Response(JSON.stringify(bodies.shift()), { status: 200 }),
+    );
+    const catalog = new Set(["stale:seed"]);
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], {
+      fetch: fetcher as typeof fetch,
+      catalog,
+    });
+    const provider = registeredProvider(pi);
+    await provider.refreshModels?.(refreshContext());
+    expect([...catalog]).toEqual(["nebius:openai/gpt-oss-120b"]);
+    await provider.refreshModels?.(refreshContext());
+    expect(catalog.size).toBe(0);
+  });
+
+  it("leaves the catalog untouched when discovery fails", async () => {
+    const fetcher = vi.fn(async () => new Response("{}", { status: 500 }));
+    const catalog = new Set(["nebius:openai/gpt-oss-120b"]);
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], {
+      fetch: fetcher as typeof fetch,
+      catalog,
+    });
+    await expect(
+      registeredProvider(pi).refreshModels?.(refreshContext()),
+    ).rejects.toThrow();
+    expect([...catalog]).toEqual(["nebius:openai/gpt-oss-120b"]);
+  });
+
+  it("warns once about an OTARI_MODELS selector discovery does not list, naming its replacement", async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: [{ id: "nebius:openai/gpt-oss-120b" }] }),
+          { status: 200 },
+        ),
+    );
+    const onDiagnostic = vi.fn();
+    const pi = fakePi();
+    registerOtariProvider(
+      pi,
+      {
+        ...config,
+        environmentModels: [
+          "mzai:openai/gpt-oss-120b",
+          "nebius:openai/gpt-oss-120b",
+        ],
+      },
+      [],
+      { fetch: fetcher as typeof fetch, onDiagnostic },
+    );
+    const provider = registeredProvider(pi);
+    await provider.refreshModels?.(refreshContext());
+    await provider.refreshModels?.(refreshContext());
+    expect(onDiagnostic).toHaveBeenCalledTimes(1);
+    expect(onDiagnostic.mock.calls[0][0]).toMatchObject({
+      level: "warning",
+      code: "selector-stale",
+    });
+    const { message } = onDiagnostic.mock.calls[0][0];
+    expect(message).toContain('"mzai:openai/gpt-oss-120b"');
+    expect(message).toContain('listed as "nebius:openai/gpt-oss-120b"');
+    expect(message).toContain("OTARI_MODELS");
+    // The selector stays registered: OTARI_MODELS may name models discovery omits.
+    expect(provider.getModels().map((model) => model.id)).toEqual([
+      "mzai:openai/gpt-oss-120b",
+      "nebius:openai/gpt-oss-120b",
+    ]);
+  });
+
+  it("does not judge OTARI_MODELS selectors when discovery returns no models", async () => {
+    const fetcher = vi.fn(
+      async () => new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+    const onDiagnostic = vi.fn();
+    const pi = fakePi();
+    registerOtariProvider(
+      pi,
+      { ...config, environmentModels: ["anthropic:claude-sonnet-5"] },
+      [],
+      { fetch: fetcher as typeof fetch, onDiagnostic },
+    );
+    await registeredProvider(pi).refreshModels?.(refreshContext());
+    expect(onDiagnostic.mock.calls.map((call) => call[0].code)).toEqual([
+      "discovery-empty",
+    ]);
+  });
 });

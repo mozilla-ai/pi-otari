@@ -89,7 +89,7 @@ export OTARI_MODELS="anthropic:claude-sonnet-5,mistral:mistral-medium-3-5" # opt
 pi
 ```
 
-These selectors are unverified until the first request. Otari must have the corresponding provider and model enabled for the workspace.
+These selectors are registered as given, and Otari must have the corresponding provider and model enabled for the workspace. When discovery succeeds and its list does not include one of them, the extension warns once, naming the selector and, if the same model is listed under another provider prefix, the current selector to use instead. The entry itself stays registered until you update or remove it in `OTARI_MODELS` and restart Pi.
 
 ## Reasoning levels
 
@@ -141,6 +141,7 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 - **Missing credentials:** run `/login otari`, or set `OTARI_API_KEY` before starting or restarting Pi.
 - **401/403:** run `/login otari` with a valid replacement key, or update `OTARI_API_KEY` when no stored credential exists and restart Pi; then confirm workspace access. The cached model list stays in place until the key is fixed.
 - **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, refresh the provider, or select a different Otari model in Pi.
+- **“Otari at … does not list …”:** that selector is not in the model list Otari returned for the configured URL. Its provider or model was disabled, or the model moved to another provider prefix, as with hosted Otari's retired `mzai:` prefix. Select a current model in `/model`; if the selector comes from `OTARI_MODELS`, update or remove it there.
 - **“hosted model discovery is unavailable”:** The hosted `/models` endpoint returned `404` or `405`. No public catalog fallback is supported. Retry discovery when the service is available; if the error persists, contact the Otari service operator.
 - **“Otari model discovery returned HTTP 404 … Set OTARI_BASE_URL=…”:** `OTARI_BASE_URL` has the wrong API prefix for that gateway. Set it to the URL shown and restart Pi. Otari 0.6.0 and newer serve `/api/v1`; older gateways served `/v1`.
 - **“Could not refresh otari; showing cached models”:** this is Pi's summary. The extension's own warning next to it has the cause and, where possible, the fix.
