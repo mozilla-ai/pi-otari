@@ -76,7 +76,7 @@ After login and during provider refresh, the extension queries `{OTARI_BASE_URL}
 
 Otari's catalog is dynamic: workspaces can enable and remove providers and models at any time. Pi stores the last discovered list in `~/.pi/agent/models-store.json` and shows that list until the next refresh. In interactive mode Pi refreshes in the background at startup, after `/login otari`, and whenever you open `/model`. Print mode and `pi --list-models` read the cache only.
 
-The cache belongs to one Otari deployment. Pointing `OTARI_BASE_URL` at a different host, such as switching between hosted and self-hosted Otari, drops the previous deployment's entries, and the list stays empty until the next refresh. Changing only the API prefix on the same host keeps them, since the deployment is the same. Refresh after adding or removing models in Otari: until then, entries from the previous catalog stay listed, and a request to one that no longer exists fails with an error from the gateway.
+The cache belongs to one Otari deployment. Pointing `OTARI_BASE_URL` at a different host, such as switching between hosted and self-hosted Otari, drops the previous deployment's entries, and the list stays empty until the next refresh. Changing only the API prefix on the same host keeps them, since the deployment is the same. Refresh after adding or removing models in Otari: until then, entries from the previous catalog stay listed, and a request to one that no longer exists fails with an error from the gateway. Pi warns you when a previously selected model is missing from the refreshed list, so you can pick a current one.
 
 ### Wrong API prefix
 

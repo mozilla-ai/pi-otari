@@ -1,16 +1,24 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
+import type { Catalog } from "../src/staleness.js";
 import { registerLifecycleUI } from "../src/status.js";
-import type { RuntimeState } from "../src/types.js";
+import type { OtariConfig, RuntimeState } from "../src/types.js";
 
-function harness(state: RuntimeState) {
+const config: OtariConfig = {
+  baseUrl: "https://api.otari.ai/api/v1",
+  discoveryTimeoutMs: 5000,
+  environmentModels: [],
+  officialHosted: true,
+};
+
+function harness(state: RuntimeState, catalog: Catalog = new Set()) {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const pi = {
     on: vi.fn((name: string, handler: (...args: unknown[]) => unknown) =>
       handlers.set(name, handler),
     ),
   } as unknown as ExtensionAPI;
-  const ui = registerLifecycleUI(pi, () => state);
+  const ui = registerLifecycleUI(pi, () => state, catalog);
   return { handlers, ui };
 }
 
@@ -109,11 +117,15 @@ describe("lifecycle UI", () => {
   });
 
   it("does not show a success notification", async () => {
-    const { handlers } = harness({
-      models: [{ id: "mzai:model", source: "standard" }],
-      diagnostics: [],
-      discoverySource: "standard",
-    });
+    const { handlers } = harness(
+      {
+        config,
+        models: [{ id: "mzai:model", source: "standard" }],
+        diagnostics: [],
+        discoverySource: "standard",
+      },
+      new Set(["mzai:model"]),
+    );
     const ctx = context({ model: { provider: "otari", id: "mzai:model" } });
     await handlers.get("session_start")?.({ reason: "startup" }, ctx);
     expect(ctx.ui.notify).not.toHaveBeenCalled();
@@ -162,6 +174,60 @@ describe("lifecycle UI", () => {
     const ctx = { ...context(), hasUI: false };
     await handlers.get("session_start")?.({ reason: "startup" }, ctx);
     ui.reportDiagnostic({ level: "error", code: "x", message: "m" });
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
+  it("warns at session start when the restored Otari model is not in the discovered list", async () => {
+    const { handlers } = harness(
+      { config, models: [], diagnostics: [], discoverySource: "standard" },
+      new Set(["nebius:openai/gpt-oss-120b"]),
+    );
+    const ctx = context({
+      model: { provider: "otari", id: "mzai:openai/gpt-oss-120b" },
+    });
+    await handlers.get("session_start")?.({ reason: "resume" }, ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+    const [message, level] = ctx.ui.notify.mock.calls[0];
+    expect(level).toBe("warning");
+    expect(message).toContain('does not list "mzai:openai/gpt-oss-120b"');
+    expect(message).toContain('listed as "nebius:openai/gpt-oss-120b"');
+  });
+
+  it("warns on selecting a stale Otari model and stays quiet for listed or non-Otari ones", async () => {
+    const { handlers } = harness(
+      { config, models: [], diagnostics: [], discoverySource: "standard" },
+      new Set(["nebius:openai/gpt-oss-120b"]),
+    );
+    const ctx = context();
+    const select = handlers.get("model_select");
+    await select?.(
+      { model: { provider: "otari", id: "mzai:openai/gpt-oss-120b" } },
+      ctx,
+    );
+    await select?.(
+      { model: { provider: "otari", id: "nebius:openai/gpt-oss-120b" } },
+      ctx,
+    );
+    await select?.({ model: { provider: "openai", id: "gpt" } }, ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining('"mzai:openai/gpt-oss-120b"'),
+      "warning",
+    );
+  });
+
+  it("judges no selection before discovery has answered", async () => {
+    const { handlers } = harness({
+      config,
+      models: [],
+      diagnostics: [],
+      discoverySource: "none",
+    });
+    const ctx = context({
+      model: { provider: "otari", id: "mzai:openai/gpt-oss-120b" },
+    });
+    await handlers.get("session_start")?.({ reason: "startup" }, ctx);
+    await handlers.get("model_select")?.({ model: ctx.model }, ctx);
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 });
