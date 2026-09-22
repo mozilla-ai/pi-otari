@@ -1,4 +1,4 @@
-export type ModelSource = "standard" | "managed-catalog" | "environment";
+export type ModelSource = "standard" | "environment";
 export type DiagnosticLevel = "warning" | "error";
 
 export interface Diagnostic {

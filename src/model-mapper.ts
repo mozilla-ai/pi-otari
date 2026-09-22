@@ -87,41 +87,6 @@ export function parseStandardModelList(value: unknown): OtariModel[] {
   return models;
 }
 
-export function parseManagedCatalog(value: unknown): OtariModel[] {
-  const root = record(value);
-  if (!root || !Array.isArray(root.data))
-    throw new Error("Managed catalog must contain a data array");
-  const models = root.data.flatMap((value) => {
-    const item = record(value);
-    if (
-      !item ||
-      typeof item.provider !== "string" ||
-      typeof item.model !== "string"
-    )
-      return [];
-    const provider = item.provider.trim();
-    const model = item.model.trim();
-    if (!provider || !model) return [];
-    return [
-      {
-        id: `${provider}:${model}`,
-        name: model,
-        cost: {
-          input: price(item.input_price_per_million),
-          output: price(item.output_price_per_million),
-          cacheRead: price(item.cache_read_price_per_million),
-          cacheWrite: price(item.cache_write_price_per_million),
-        },
-        source: "managed-catalog" as const,
-      },
-    ];
-  });
-  if (root.data.length > 0 && models.length === 0) {
-    throw new Error("Managed catalog contains no valid model entries");
-  }
-  return models;
-}
-
 export function selectorsToModels(selectors: string[]): OtariModel[] {
   return selectors.map((id) => ({ id, name: id, source: "environment" }));
 }

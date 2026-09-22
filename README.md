@@ -70,7 +70,7 @@ pi remove npm:@mozilla-ai/pi-otari
 
 ## Model discovery
 
-After login and during provider refresh, the extension queries `{OTARI_BASE_URL}/models` (`https://api.otari.ai/api/v1/models` for hosted otari) with the workspace token. Only models available through providers enabled for the authenticated workspace are registered. If the hosted endpoint responds with `404` or `405`, the extension safely falls back to the public managed `mzai` catalog without sending the workspace token.
+After login and during provider refresh, the extension queries `{OTARI_BASE_URL}/models` (`https://api.otari.ai/api/v1/models` for hosted otari) with the workspace token. Only models available through providers enabled for the authenticated workspace are registered. If the hosted endpoint responds with `404` or `405`, the extension reports that hosted model discovery is unavailable. It does not request a public catalog or substitute models outside the authenticated discovery response.
 
 ### The model list is a cache
 
@@ -131,7 +131,7 @@ HTTP is accepted only for loopback development endpoints.
 
 ## Privacy and security
 
-Model requests using `otari/*` pass through Otari and the selected upstream provider. The extension does not maintain its own credential file. When you use `/login otari`, Pi stores the API key in `~/.pi/agent/auth.json`; when you use `OTARI_API_KEY`, the key remains environment-provided. The extension stores no prompts, responses, tool content, or telemetry. Pi persists provider model metadata in its native model store. Discovery rejects redirects and never sends a token to the public managed-catalog fallback. When discovery returns `404` from a self-hosted gateway, the extension also requests that gateway's public health route on the other API prefix, again without the token.
+Model requests using `otari/*` pass through Otari and the selected upstream provider. The extension does not maintain its own credential file. When you use `/login otari`, Pi stores the API key in `~/.pi/agent/auth.json`; when you use `OTARI_API_KEY`, the key remains environment-provided. The extension stores no prompts, responses, tool content, or telemetry. Pi persists provider model metadata in its native model store. Discovery rejects redirects and sends the token only to the configured model-discovery endpoint. When discovery returns `404` from a self-hosted gateway, the extension also requests that gateway's public health route on the other API prefix, again without the token.
 
 ## Troubleshooting
 
@@ -140,6 +140,7 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 - **Missing credentials:** run `/login otari`, or set `OTARI_API_KEY` before starting or restarting Pi.
 - **401/403:** run `/login otari` with a valid replacement key, or update `OTARI_API_KEY` when no stored credential exists and restart Pi; then confirm workspace access.
 - **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, refresh the provider, or select a different Otari model in Pi.
+- **“hosted model discovery is unavailable”:** The hosted `/models` endpoint returned `404` or `405`. No public catalog fallback is supported. Retry discovery when the service is available; if the error persists, contact the Otari service operator.
 - **“Otari model discovery returned HTTP 404 … Set OTARI_BASE_URL=…”:** `OTARI_BASE_URL` has the wrong API prefix for that gateway. Set it to the URL shown and restart Pi. Otari 0.6.0 and newer serve `/api/v1`; older gateways served `/v1`.
 - **“Could not refresh otari; showing cached models”:** this is Pi's summary. The extension's own warning next to it has the cause and, where possible, the fix.
 - **Models listed that no longer exist, or new ones missing:** the list is a cache. Open `/model` to refresh it. See [The model list is a cache](#the-model-list-is-a-cache).

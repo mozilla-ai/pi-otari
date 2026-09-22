@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { discoverModels, MANAGED_CATALOG_URL } from "../src/discovery.js";
+import { discoverModels } from "../src/discovery.js";
 import type { OtariConfig } from "../src/types.js";
 
 const base: OtariConfig = {
@@ -59,47 +59,24 @@ describe("discoverModels", () => {
   });
 
   it.each([404, 405])(
-    "uses the public managed catalog only for hosted %s",
+    "reports hosted %s without requesting a public catalog or probing another API root",
     async (status) => {
-      const fetcher = vi.fn(
-        async (url: string | URL | Request, init?: RequestInit) => {
-          const target = String(url);
-          if (target === MANAGED_CATALOG_URL) {
-            expect(new Headers(init?.headers).get("authorization")).toBeNull();
-            return response(200, {
-              data: [
-                {
-                  provider: "mzai",
-                  model: "org/model",
-                  input_price_per_million: "1",
-                  output_price_per_million: "2",
-                },
-              ],
-            });
-          }
-          return response(status, { detail: "Not Found" });
-        },
+      const fetcher = vi.fn(async (url: string | URL | Request) =>
+        response(String(url) === `${base.baseUrl}/models` ? status : 404, {}),
       );
-      const result = await discoverModels(base, fetcher as typeof fetch);
-      expect(fetcher).toHaveBeenCalledTimes(2);
-      expect(result.models[0].id).toBe("mzai:org/model");
-      expect(result.source).toBe("managed-catalog");
+      await expect(
+        discoverModels(base, fetcher as typeof fetch),
+      ).rejects.toMatchObject({
+        name: "DiscoveryUnavailableError",
+        diagnostic: {
+          code: "discovery-http",
+          message: `Otari model discovery returned HTTP ${status} at ${base.baseUrl}/models; hosted model discovery is unavailable. No public catalog fallback is supported`,
+        },
+      });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(String(fetcher.mock.calls[0][0])).toBe(`${base.baseUrl}/models`);
     },
   );
-
-  it("rejects a managed-catalog outage without replacing native cache", async () => {
-    const fetcher = vi.fn(async (url: string | URL | Request) =>
-      String(url) === MANAGED_CATALOG_URL
-        ? response(500, {})
-        : response(404, {}),
-    );
-    await expect(
-      discoverModels(base, fetcher as typeof fetch),
-    ).rejects.toMatchObject({
-      name: "DiscoveryUnavailableError",
-      diagnostic: { code: "managed-catalog-http" },
-    });
-  });
 
   it("does not use hosted fallback for a custom endpoint", async () => {
     const fetcher = vi.fn(async (_url: string | URL | Request) =>
@@ -114,9 +91,10 @@ describe("discoverModels", () => {
       name: "DiscoveryUnavailableError",
       diagnostic: { code: "discovery-http" },
     });
-    expect(fetcher.mock.calls.map((call) => String(call[0]))).not.toContain(
-      MANAGED_CATALOG_URL,
-    );
+    expect(fetcher.mock.calls.map((call) => String(call[0]))).toEqual([
+      "https://self.example/v1/models",
+      "https://self.example/api/v1/health",
+    ]);
   });
 
   it.each([401, 403])(
@@ -285,18 +263,6 @@ describe("discoverModels", () => {
         ),
       ).rejects.toMatchObject({ diagnostic: { code: "discovery-http" } });
       expect(fetcher).toHaveBeenCalledTimes(1);
-    });
-
-    it("leaves the hosted 404 path to the managed fallback", async () => {
-      const fetcher = vi.fn(async (url: string | URL | Request) =>
-        String(url) === MANAGED_CATALOG_URL
-          ? response(200, { data: [] })
-          : response(404, {}),
-      );
-      await discoverModels(base, fetcher as typeof fetch);
-      expect(fetcher.mock.calls.map((call) => String(call[0]))).not.toContain(
-        "https://api.otari.ai/v1/health",
-      );
     });
   });
 });
