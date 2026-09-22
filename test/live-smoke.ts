@@ -6,9 +6,10 @@
  * the gateway's own reason where there is one.
  */
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -18,10 +19,19 @@ import {
 const DEFAULT_BASE_URL = "https://api.otari.ai/api/v1";
 const DEFAULT_MAX_TOKENS = 8;
 const REQUEST_TIMEOUT_MS = 30_000;
-const RUN_TIMEOUT_MS = 120_000;
+const RUN_TIMEOUT_MS = 300_000;
 const PROMPT = "Reply with exactly: ok";
 /** Loaded by path through Pi's own extension loader, as `pi -e` does. */
 const EXTENSION_PATH = resolve(import.meta.dirname, "../src/index.ts");
+const THINKING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+type LiveThinkingLevel = (typeof THINKING_LEVELS)[number];
 const CAPABILITY_FIELDS = [
   "reasoning",
   "input_modalities",
@@ -38,6 +48,18 @@ function parseMaxTokens(value: string | undefined): number {
     `Set OTARI_LIVE_TEST_MAX_TOKENS to a positive integer, or leave it unset for the default of ${DEFAULT_MAX_TOKENS}`,
   );
   return parsed;
+}
+
+function parseReasoning(
+  value: string | undefined,
+): LiveThinkingLevel | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const level = value.trim();
+  assert.ok(
+    (THINKING_LEVELS as readonly string[]).includes(level),
+    `Set OTARI_LIVE_TEST_REASONING to one of ${THINKING_LEVELS.join(", ")}, or leave it unset to prompt without reasoning`,
+  );
+  return level as LiveThinkingLevel;
 }
 
 /** One line per passed stage; the first failure ends the run. */
@@ -64,7 +86,7 @@ function modelPart(selector: string): string {
   return separator === -1 ? selector : selector.slice(separator + 1);
 }
 
-const { token, model, baseUrl, maxTokens } = await stage(
+const { token, model, baseUrl, maxTokens, reasoning } = await stage(
   "configuration",
   async () => {
     const token = process.env.OTARI_LIVE_TEST_TOKEN;
@@ -73,6 +95,7 @@ const { token, model, baseUrl, maxTokens } = await stage(
       .trim()
       .replace(/\/+$/, "");
     const maxTokens = parseMaxTokens(process.env.OTARI_LIVE_TEST_MAX_TOKENS);
+    const reasoning = parseReasoning(process.env.OTARI_LIVE_TEST_REASONING);
     assert.ok(
       token,
       "Set OTARI_LIVE_TEST_TOKEN to an API key for the Otari gateway under test",
@@ -81,8 +104,10 @@ const { token, model, baseUrl, maxTokens } = await stage(
       model,
       "Set OTARI_LIVE_TEST_MODEL to a model selector that gateway lists, for example nebius:Qwen/Qwen3-30B-A3B-Instruct-2507",
     );
-    console.log(`  ${baseUrl}, model ${model}, ${maxTokens} output tokens`);
-    return { token, model, baseUrl, maxTokens };
+    console.log(
+      `  ${baseUrl}, model ${model}, ${maxTokens} output tokens${reasoning ? `, reasoning ${reasoning}` : ""}`,
+    );
+    return { token, model, baseUrl, maxTokens, reasoning };
   },
 );
 
@@ -107,6 +132,12 @@ const { session, cleanup } = await stage(
     delete process.env.OTARI_MODELS;
     const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-live-"));
     const cwd = await mkdtemp(join(tmpdir(), "pi-otari-live-cwd-"));
+    // One request per prompt: a gateway error is the finding, so Pi's turn
+    // retries stay off for this session.
+    await writeFile(
+      join(agentDir, "settings.json"),
+      JSON.stringify({ retry: { enabled: false } }),
+    );
     const cleanup = async () => {
       await rm(agentDir, { recursive: true, force: true });
       await rm(cwd, { recursive: true, force: true });
@@ -119,16 +150,18 @@ const { session, cleanup } = await stage(
     });
     await resourceLoader.reload();
     const { errors } = resourceLoader.getExtensions();
-    assert.equal(
-      errors.length,
-      0,
+    assert.ok(
+      errors.length === 0,
       `Pi could not load ${EXTENSION_PATH}:\n${errors.map((item) => `  ${item.error}`).join("\n")}`,
     );
+    // The check covers the prompt itself: tool definitions stay out of the
+    // request, and nothing can run a tool on the developer's machine.
     const { session } = await createAgentSession({
       cwd,
       agentDir,
       resourceLoader,
       sessionManager: SessionManager.inMemory(cwd),
+      noTools: "all",
     });
     // A registered provider with a usable key resolves auth. An extension
     // that rejected its configuration registers nothing.
@@ -268,6 +301,69 @@ await stage("non-streaming completion", async () => {
     );
   }
   console.log(`  ${model} replied: ${excerpt(text, 80)}`);
+});
+
+/**
+ * The prompt travels as a user's does: Pi's agent loop, the extension's
+ * stream wrapper, and pi-ai's streaming client, against the discovered model
+ * with its output capped at the configured bound. Otari publishes no
+ * reasoning flag yet (#6), so the extension registers every model without
+ * reasoning and Pi would clamp any level to off. The opt-in marks the copy
+ * reasoning-capable so the requested level reaches the gateway through the
+ * same transport.
+ */
+await stage("streaming completion through Pi", async () => {
+  const selected = {
+    ...discovered,
+    maxTokens,
+    ...(reasoning ? { reasoning: true } : {}),
+  };
+  await session.setModel(selected);
+  if (reasoning) {
+    session.setThinkingLevel(reasoning);
+    assert.ok(
+      session.state.thinkingLevel === reasoning,
+      `Pi offers ${session.getAvailableThinkingLevels().join(", ")} for ${model}, not "${reasoning}". Set OTARI_LIVE_TEST_REASONING to one of those`,
+    );
+  }
+  const before = session.state.messages.length;
+  await session.prompt(PROMPT);
+  const replies = session.state.messages
+    .slice(before)
+    .filter((item): item is AssistantMessage => item.role === "assistant");
+  const reply = replies.at(-1);
+  assert.ok(reply, `Pi recorded no assistant reply from ${model}`);
+  if (reply.stopReason === "error") {
+    throw new Error(
+      `Pi reported an error for ${model}:\n${reply.errorMessage ?? "(no message)"}`,
+    );
+  }
+  if (reply.stopReason === "length") {
+    throw new Error(
+      `${model} used all ${maxTokens} output tokens before finishing. Raise OTARI_LIVE_TEST_MAX_TOKENS, or choose an instruct model that answers without reasoning first`,
+    );
+  }
+  assert.ok(
+    reply.stopReason === "stop",
+    `${model} stopped with "${reply.stopReason}" instead of "stop"`,
+  );
+  assert.ok(
+    replies.length === 1,
+    `Pi sent ${replies.length} requests for one prompt (stop reasons: ${replies.map((item) => item.stopReason).join(", ")}). Expected a single reply`,
+  );
+  const text = reply.content
+    .map((part) => (part.type === "text" ? part.text : ""))
+    .join("")
+    .trim();
+  assert.ok(
+    text !== "",
+    `${model} streamed no text. Content: ${excerpt(JSON.stringify(reply.content))}`,
+  );
+  const thinking = reply.content.some((part) => part.type === "thinking");
+  console.log(`  ${model} replied: ${excerpt(text, 80)}`);
+  console.log(
+    `  thinking level ${session.state.thinkingLevel}${thinking ? ", reasoning content streamed" : ""}; ${reply.usage.input} input, ${reply.usage.output} output tokens`,
+  );
 });
 
 clearTimeout(watchdog);
