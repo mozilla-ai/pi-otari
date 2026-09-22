@@ -4,6 +4,7 @@ import {
   VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { ConfigError, loadOtariConfig } from "./config.js";
+import type { Catalog } from "./staleness.js";
 import { registerLifecycleUI } from "./status.js";
 import type { OtariConfig, RuntimeState } from "./types.js";
 
@@ -36,7 +37,8 @@ export function createOtariExtension(
       diagnostics: [],
       discoverySource: "none",
     };
-    const ui = registerLifecycleUI(pi, () => state);
+    const catalog: Catalog = new Set();
+    const ui = registerLifecycleUI(pi, () => state, catalog);
 
     if (!supportsNativeProviderAuth(dependencies.piVersion ?? VERSION)) {
       state = {
@@ -79,6 +81,7 @@ export function createOtariExtension(
     registerOtariProvider(pi, config, [], {
       fetch: dependencies.fetch ?? fetch,
       onDiagnostic: (diagnostic) => ui.reportDiagnostic(diagnostic),
+      catalog,
     });
     state = { ...state, config };
   };

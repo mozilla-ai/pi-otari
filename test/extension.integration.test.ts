@@ -142,6 +142,84 @@ describe("Pi–Otari integration", () => {
     }
   });
 
+  it("explains a gateway rejection of a selector that discovery no longer lists", async () => {
+    let completionCount = 0;
+    const server = createServer(async (request, response) => {
+      if (request.method === "GET" && request.url === "/api/v1/models") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "nebius:test-model" }] }));
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        request.url === "/api/v1/chat/completions"
+      ) {
+        completionCount += 1;
+        expect((await body(request)).model).toBe("mzai:test-model");
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            detail: "No credential is configured for 'mzai' on this deployment",
+          }),
+        );
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Expected TCP server");
+
+    vi.stubEnv("OTARI_API_KEY", "tk_integration");
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/api/v1`);
+    vi.stubEnv("OTARI_MODELS", "mzai:test-model");
+    const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-integration-"));
+    const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      extensionFactories: [createOtariExtension()],
+    });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({
+      cwd,
+      agentDir,
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+    try {
+      await session.modelRuntime.refresh({ allowNetwork: true });
+      // OTARI_MODELS keeps the selector registered even though discovery
+      // lists the model under another provider now.
+      const model = session.modelRuntime.getModel("otari", "mzai:test-model");
+      expect(model).toBeDefined();
+      if (!model) throw new Error("Expected the OTARI_MODELS selector");
+      await session.setModel(model);
+      await session.prompt("Reply with done.");
+
+      // One request: Pi retries a turn whose error text looks transient, so
+      // the explanation must not read as one (it carries no URL or port).
+      expect(completionCount).toBe(1);
+      const last = session.state.messages.at(-1) as {
+        stopReason?: string;
+        errorMessage?: string;
+      };
+      expect(last.stopReason).toBe("error");
+      expect(last.errorMessage).not.toContain("127.0.0.1");
+      expect(last.errorMessage).toContain('does not list "mzai:test-model"');
+      expect(last.errorMessage).toContain('listed as "nebius:test-model"');
+      // The gateway's reason travels in a `detail` field the OpenAI client
+      // does not surface, so the explanation is what the user has to go on.
+      expect(last.errorMessage).toMatch(/\n\n400 status code \(no body\)$/);
+    } finally {
+      session.dispose();
+      server.close();
+      await once(server, "close");
+    }
+  });
+
   it("routes the selected model through Otari and continues after a tool call", async () => {
     let completionCount = 0;
     const server = createServer(async (request, response) => {

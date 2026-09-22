@@ -76,7 +76,7 @@ After login and during provider refresh, the extension queries `{OTARI_BASE_URL}
 
 Otari's catalog is dynamic: workspaces can enable and remove providers and models at any time. Pi stores the last discovered list in `~/.pi/agent/models-store.json` and shows that list until the next refresh. In interactive mode Pi refreshes in the background at startup, after `/login otari`, and whenever you open `/model`. Print mode and `pi --list-models` read the cache only.
 
-Refresh after changing `OTARI_BASE_URL`, after switching between hosted and self-hosted Otari, and after adding or removing models in Otari. Until then, entries from the previous catalog stay listed, and if they do not exist anymore a request to one of them fails with an error from the gateway.
+The cache belongs to one Otari deployment. Pointing `OTARI_BASE_URL` at a different host, such as switching between hosted and self-hosted Otari, drops the previous deployment's entries, and the list stays empty until the next refresh. Changing only the API prefix on the same host keeps them, since the deployment is the same. Refresh after adding or removing models in Otari: until then, entries from the previous catalog stay listed, and a request to one that no longer exists fails with an error from the gateway. Pi warns you when a previously selected model is missing from the refreshed list, so you can pick a current one.
 
 ### Wrong API prefix
 
@@ -89,7 +89,7 @@ export OTARI_MODELS="anthropic:claude-sonnet-5,mistral:mistral-medium-3-5" # opt
 pi
 ```
 
-These selectors are unverified until the first request. Otari must have the corresponding provider and model enabled for the workspace.
+These selectors are registered as given, and Otari must have the corresponding provider and model enabled for the workspace. When discovery succeeds and its list does not include one of them, the extension warns once, naming the selector and, if the same model is listed under another provider prefix, the current selector to use instead. The entry itself stays registered until you update or remove it in `OTARI_MODELS` and restart Pi.
 
 ## Reasoning levels
 
@@ -137,9 +137,12 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 
 - **“pi-otari requires Pi 0.81.0 or newer”:** run `pi update`, then restart Pi. The package uses wildcard Pi peer dependencies, as required for Pi packages, and checks host compatibility at runtime instead of installing a second copy of Pi.
 - **No Otari models in `/model`:** run `/scoped-models`, search for `otari`, enable models, and press <kbd>Ctrl</kbd>+<kbd>S</kbd>. If no models are available there, set `OTARI_MODELS` before starting or restarting Pi.
+- **“Otari returned no models for this workspace”:** discovery succeeded but the workspace has no enabled provider or model. Enable one in Otari, then open `/model` to refresh; until then `/model` lists no Otari models.
 - **Missing credentials:** run `/login otari`, or set `OTARI_API_KEY` before starting or restarting Pi.
-- **401/403:** run `/login otari` with a valid replacement key, or update `OTARI_API_KEY` when no stored credential exists and restart Pi; then confirm workspace access.
+- **401/403:** Otari rejected the key used for discovery. Run `/login otari` with a valid replacement key, or set `OTARI_API_KEY` and restart Pi; then confirm workspace access. One possible cause is a stale key saved with `/login otari`, which takes precedence over `OTARI_API_KEY`; run `/logout otari` to fall back to the environment variable. The cached model list stays in place until the key is fixed.
 - **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, refresh the provider, or select a different Otari model in Pi.
+- **“Otari (at …) does not list …”:** that selector is not in the model list Otari returned for the configured URL. Its provider or model was disabled, or the model moved to another provider prefix, as with hosted Otari's retired `mzai:` prefix. Select a current model in `/model`; if the selector comes from `OTARI_MODELS`, update or remove it there.
+- **“400 status code (no body)” on a prompt:** Otari rejected the request; its reason travels in a `detail` field that Pi's OpenAI client does not display (a direct `curl` to `/chat/completions` shows it). When the selected model is missing from the discovered list, the extension's explanation precedes this line. Otherwise, check in Otari that the model's provider is enabled and has a credential, or select a model from another provider in `/model`.
 - **“hosted model discovery is unavailable”:** The hosted `/models` endpoint returned `404` or `405`. No public catalog fallback is supported. Retry discovery when the service is available; if the error persists, contact the Otari service operator.
 - **“Otari model discovery returned HTTP 404 … Set OTARI_BASE_URL=…”:** `OTARI_BASE_URL` has the wrong API prefix for that gateway. Set it to the URL shown and restart Pi. Otari 0.6.0 and newer serve `/api/v1`; older gateways served `/v1`.
 - **“Could not refresh otari; showing cached models”:** this is Pi's summary. The extension's own warning next to it has the cause and, where possible, the fix.

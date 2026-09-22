@@ -37,11 +37,21 @@ async function request(
   }
 }
 
-function successful(models: OtariModel[], source: "standard"): DiscoveryResult {
+function successful(models: OtariModel[]): DiscoveryResult {
+  if (models.length > 0) return { models, source: "standard", diagnostics: [] };
+  // An empty list is what the workspace really offers, so it replaces the
+  // cache like any other answer. Communicate this to the user.
   return {
     models,
-    source: models.length > 0 ? source : "none",
-    diagnostics: [],
+    source: "none",
+    diagnostics: [
+      {
+        level: "warning",
+        code: "discovery-empty",
+        message:
+          "Otari returned no models for this workspace; enable a provider and model in Otari, then open /model to refresh",
+      },
+    ],
   };
 }
 
@@ -128,10 +138,7 @@ export async function discoverModels(
     );
     if (response.ok) {
       try {
-        return successful(
-          parseStandardModelList(await response.json()),
-          "standard",
-        );
+        return successful(parseStandardModelList(await response.json()));
       } catch {
         throw new DiscoveryUnavailableError({
           level: "warning",
@@ -151,17 +158,14 @@ export async function discoverModels(
       });
     }
     if (response.status === 401 || response.status === 403) {
-      return {
-        models: [],
-        source: "none",
-        diagnostics: [
-          {
-            level: "error",
-            code: "discovery-auth",
-            message: `Otari model discovery returned HTTP ${response.status}; run /login otari with a valid key or update OTARI_API_KEY, then confirm workspace access`,
-          },
-        ],
-      };
+      // A rejected key says nothing about the catalog. Throwing keeps Pi's
+      // cached list in place, since createProvider persists only what
+      // fetchModels returns.
+      throw new DiscoveryUnavailableError({
+        level: "error",
+        code: "discovery-auth",
+        message: `Otari model discovery returned HTTP ${response.status}. Run /login otari with a valid key, or set OTARI_API_KEY (after /logout otari if a key is saved); then confirm workspace access`,
+      });
     }
     if (response.status === 404) {
       throw new DiscoveryUnavailableError(

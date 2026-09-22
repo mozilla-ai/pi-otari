@@ -2,6 +2,12 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+  type Catalog,
+  describeStale,
+  isStale,
+  replacementsFor,
+} from "./staleness.js";
 import type { Diagnostic, RuntimeState } from "./types.js";
 
 export interface LifecycleUI {
@@ -37,15 +43,32 @@ async function isOtariConfigured(ctx: ExtensionContext): Promise<boolean> {
 export function registerLifecycleUI(
   pi: ExtensionAPI,
   getState: () => RuntimeState,
+  catalog: Catalog,
 ): LifecycleUI {
   let ui: ExtensionContext["ui"] | undefined;
   const captureUI = (ctx: ExtensionContext) => {
     ui = ctx.hasUI ? ctx.ui : undefined;
   };
 
+  // Discovery is the authority on what Otari routes. Warn user when the
+  // previously selected model is missing from the last discovered list.
+  const warnIfStale = (
+    ctx: ExtensionContext,
+    model: { provider: string; id: string } | undefined,
+  ) => {
+    const baseUrl = getState().config?.baseUrl;
+    if (!ctx.hasUI || !baseUrl || model?.provider !== "otari") return;
+    if (!isStale(catalog, model.id)) return;
+    ctx.ui.notify(
+      describeStale(model.id, baseUrl, replacementsFor(model.id, catalog)),
+      "warning",
+    );
+  };
+
   pi.on("model_select", (event, ctx) => {
     captureUI(ctx);
     updateStatus(ctx, event.model.provider, event.model.id);
+    warnIfStale(ctx, event.model);
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -69,6 +92,7 @@ export function registerLifecycleUI(
         "warning",
       );
     }
+    warnIfStale(ctx, ctx.model);
   });
 
   return {
