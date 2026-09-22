@@ -137,8 +137,9 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 
 - **“pi-otari requires Pi 0.81.0 or newer”:** run `pi update`, then restart Pi. The package uses wildcard Pi peer dependencies, as required for Pi packages, and checks host compatibility at runtime instead of installing a second copy of Pi.
 - **No Otari models in `/model`:** run `/scoped-models`, search for `otari`, enable models, and press <kbd>Ctrl</kbd>+<kbd>S</kbd>. If no models are available there, set `OTARI_MODELS` before starting or restarting Pi.
+- **“Otari returned no models for this workspace”:** discovery succeeded but the workspace has no enabled provider or model. Enable one in Otari, then open `/model` to refresh; until then `/model` lists no Otari models.
 - **Missing credentials:** run `/login otari`, or set `OTARI_API_KEY` before starting or restarting Pi.
-- **401/403:** run `/login otari` with a valid replacement key, or update `OTARI_API_KEY` when no stored credential exists and restart Pi; then confirm workspace access.
+- **401/403:** run `/login otari` with a valid replacement key, or update `OTARI_API_KEY` when no stored credential exists and restart Pi; then confirm workspace access. The cached model list stays in place until the key is fixed.
 - **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, refresh the provider, or select a different Otari model in Pi.
 - **“hosted model discovery is unavailable”:** The hosted `/models` endpoint returned `404` or `405`. No public catalog fallback is supported. Retry discovery when the service is available; if the error persists, contact the Otari service operator.
 - **“Otari model discovery returned HTTP 404 … Set OTARI_BASE_URL=…”:** `OTARI_BASE_URL` has the wrong API prefix for that gateway. Set it to the URL shown and restart Pi. Otari 0.6.0 and newer serve `/api/v1`; older gateways served `/v1`.

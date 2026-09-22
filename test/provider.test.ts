@@ -300,13 +300,18 @@ describe("registerOtariProvider", () => {
     ]);
   });
 
-  it("reports thrown and returned discovery diagnostics, but not success", async () => {
+  it("reports discovery diagnostics, but not a successful discovery", async () => {
     const statuses = [404, 401, 200];
     const fetcher = vi.fn(async (_url: string | URL | Request) => {
       const status = statuses.shift() ?? 200;
-      return new Response(JSON.stringify(status === 200 ? { data: [] } : {}), {
-        status,
-      });
+      return new Response(
+        JSON.stringify(
+          status === 200
+            ? { data: [{ id: "nebius:openai/gpt-oss-120b" }] }
+            : {},
+        ),
+        { status },
+      );
     });
     const onDiagnostic = vi.fn();
     const pi = fakePi();
@@ -322,11 +327,39 @@ describe("registerOtariProvider", () => {
     );
     const provider = registeredProvider(pi);
     await expect(provider.refreshModels?.(refreshContext())).rejects.toThrow();
-    await provider.refreshModels?.(refreshContext());
+    await expect(provider.refreshModels?.(refreshContext())).rejects.toThrow();
     await provider.refreshModels?.(refreshContext());
     expect(onDiagnostic.mock.calls.map((call) => call[0].code)).toEqual([
       "discovery-http",
       "discovery-auth",
+    ]);
+  });
+
+  it("keeps the cached catalog when the key is rejected", async () => {
+    const fetcher = vi.fn(async () => new Response("{}", { status: 401 }));
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
+    const provider = registeredProvider(pi);
+    const cached = cachedModel(config.baseUrl);
+    let persisted: unknown = "untouched";
+    await expect(
+      provider.refreshModels?.(
+        refreshContext({
+          credential: { type: "api_key", key: "tk_revoked" },
+          stored: { models: [cached], checkedAt: 0 },
+          publish: async (publication) => {
+            if (publication.persist !== undefined)
+              persisted = publication.persist;
+            publication.update?.();
+            return true;
+          },
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(persisted).toBe("untouched");
+    expect(provider.getModels()).toEqual([
+      expect.objectContaining({ id: cached.id }),
     ]);
   });
 });

@@ -98,15 +98,21 @@ describe("discoverModels", () => {
   });
 
   it.each([401, 403])(
-    "treats auth status %s as authoritative",
+    "rejects auth status %s without replacing Pi's native model cache",
     async (status) => {
-      const result = await discoverModels(
-        base,
-        vi.fn(async () => response(status, {})) as typeof fetch,
-      );
-      expect(result.models).toEqual([]);
-      expect(result.diagnostics[0].code).toBe("discovery-auth");
-      expect(result.diagnostics[0].message).toContain("/login otari");
+      await expect(
+        discoverModels(
+          base,
+          vi.fn(async () => response(status, {})) as typeof fetch,
+        ),
+      ).rejects.toMatchObject({
+        name: "DiscoveryUnavailableError",
+        diagnostic: {
+          level: "error",
+          code: "discovery-auth",
+          message: expect.stringContaining("/login otari"),
+        },
+      });
     },
   );
 
@@ -127,13 +133,16 @@ describe("discoverModels", () => {
     },
   );
 
-  it("treats a valid empty 200 as authoritative", async () => {
+  it("treats a valid empty 200 as authoritative and reports it", async () => {
     const result = await discoverModels(
       base,
       vi.fn(async () => response(200, { data: [] })) as typeof fetch,
     );
     expect(result.models).toEqual([]);
     expect(result.source).toBe("none");
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ level: "warning", code: "discovery-empty" }),
+    ]);
   });
 
   it("rejects an invalid non-empty model response", async () => {
