@@ -34,10 +34,13 @@ export function replacementsFor(selector: string, catalog: Catalog): string[] {
   );
 }
 
-/** Explain a stale selector and point at the current one where there is one. */
+/**
+ * Explain a stale selector and point at the current one where there is one.
+ * Name the deployment only when a URL is given.
+ */
 export function describeStale(
   id: string,
-  baseUrl: string,
+  baseUrl: string | undefined,
   replacements: string[],
 ): string {
   const listed =
@@ -46,5 +49,6 @@ export function describeStale(
       : `the same model is listed as ${replacements
           .map((replacement) => `"${replacement}"`)
           .join(" and ")}`;
-  return `Otari at ${baseUrl} does not list "${id}"; ${listed}. Open /model to refresh and select a current model.`;
+  const where = baseUrl === undefined ? "Otari" : `Otari at ${baseUrl}`;
+  return `${where} does not list "${id}"; ${listed}. Open /model to refresh and select a current model.`;
 }

@@ -199,12 +199,15 @@ describe("Pi–Otari integration", () => {
       await session.setModel(model);
       await session.prompt("Reply with done.");
 
+      // One request: Pi retries a turn whose error text looks transient, so
+      // the explanation must not read as one (it carries no URL or port).
       expect(completionCount).toBe(1);
       const last = session.state.messages.at(-1) as {
         stopReason?: string;
         errorMessage?: string;
       };
       expect(last.stopReason).toBe("error");
+      expect(last.errorMessage).not.toContain("127.0.0.1");
       expect(last.errorMessage).toContain('does not list "mzai:test-model"');
       expect(last.errorMessage).toContain('listed as "nebius:test-model"');
       // The gateway's reason travels in a `detail` field the OpenAI client

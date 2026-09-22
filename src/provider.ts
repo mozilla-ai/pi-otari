@@ -152,7 +152,7 @@ export function registerOtariProvider(
     },
     api: {
       ...streams,
-      streamSimple: createStreamOtari(catalog, config.baseUrl),
+      streamSimple: createStreamOtari(catalog),
     },
   });
   pi.registerProvider({

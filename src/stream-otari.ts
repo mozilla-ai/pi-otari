@@ -61,16 +61,18 @@ export function explainGatewayError(
   id: string,
   message: string,
   catalog: Catalog,
-  baseUrl: string,
 ): string | undefined {
   if (!isStale(catalog, id)) return undefined;
+  // This text becomes the assistant error, which Pi checks for transient-
+  // looking statuses (429, 5xx) before retrying the turn. Leave the URL out
+  // so the check sees only the gateway's own status.
   return [
-    describeStale(id, baseUrl, replacementsFor(id, catalog)),
+    describeStale(id, undefined, replacementsFor(id, catalog)),
     message,
   ].join("\n\n");
 }
 
-export function createStreamOtari(catalog: Catalog, baseUrl: string) {
+export function createStreamOtari(catalog: Catalog) {
   return function streamOtari(
     model: Model<Api>,
     context: TranscriptContext,
@@ -96,7 +98,6 @@ export function createStreamOtari(catalog: Catalog, baseUrl: string) {
             openAIModel.id,
             message,
             catalog,
-            baseUrl,
           );
           if (explanation) {
             stream.push({

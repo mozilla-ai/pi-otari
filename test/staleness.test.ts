@@ -65,6 +65,12 @@ describe("describeStale", () => {
     expect(message).toContain("/model");
   });
 
+  it("names Otari without a deployment when no URL is given", () => {
+    const message = describeStale("mzai:openai/gpt-oss-120b", undefined, []);
+    expect(message.startsWith("Otari does not list")).toBe(true);
+    expect(message).not.toContain("http");
+  });
+
   it("says when no listed model matches", () => {
     expect(
       describeStale("mzai:gemini-2.5-pro", "https://api.otari.ai/api/v1", []),
