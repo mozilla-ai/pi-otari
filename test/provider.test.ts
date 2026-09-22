@@ -39,6 +39,38 @@ function refreshContext(
   };
 }
 
+function cachedModel(
+  baseUrl: string,
+  id = "nebius:openai/gpt-oss-120b",
+): Model<"openai-completions"> {
+  return {
+    id,
+    name: id,
+    provider: "otari",
+    api: "openai-completions",
+    baseUrl,
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384,
+  };
+}
+
+/** Cache-only refresh, as Pi runs it at startup before any network access. */
+async function restoreCached(
+  provider: Provider,
+  models: Model<"openai-completions">[],
+): Promise<void> {
+  await provider.refreshModels?.(
+    refreshContext({
+      credential: { type: "api_key", key: "tk_stored" },
+      stored: { models, checkedAt: 0 },
+      allowNetwork: false,
+    }),
+  );
+}
+
 describe("registerOtariProvider", () => {
   it("registers models with discovered reasoning capabilities", () => {
     const pi = fakePi();
@@ -212,33 +244,59 @@ describe("registerOtariProvider", () => {
     );
   });
 
-  it("applies the configured base URL to models cached under an old one", async () => {
-    const cached: Model<"openai-completions"> = {
-      id: "nebius:openai/gpt-oss-120b",
-      name: "nebius:openai/gpt-oss-120b",
-      provider: "otari",
-      api: "openai-completions",
-      baseUrl: "https://api.otari.ai/v1",
-      reasoning: false,
-      input: ["text"],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128_000,
-      maxTokens: 16_384,
-    };
+  it("carries models cached under the same host's old API prefix to the configured URL", async () => {
     const fetcher = vi.fn();
     const pi = fakePi();
     registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
     const provider = registeredProvider(pi);
-    await provider.refreshModels?.(
-      refreshContext({
-        credential: { type: "api_key", key: "tk_stored" },
-        stored: { models: [cached], checkedAt: 0 },
-        allowNetwork: false,
-      }),
-    );
+    await restoreCached(provider, [cachedModel("https://api.otari.ai/v1")]);
     expect(fetcher).not.toHaveBeenCalled();
     expect(provider.getModels()).toEqual([
-      expect.objectContaining({ id: cached.id, baseUrl: config.baseUrl }),
+      expect.objectContaining({
+        id: "nebius:openai/gpt-oss-120b",
+        baseUrl: config.baseUrl,
+      }),
+    ]);
+  });
+
+  it("drops models cached under a different origin", async () => {
+    const pi = fakePi();
+    registerOtariProvider(
+      pi,
+      {
+        ...config,
+        baseUrl: "http://localhost:8000/api/v1",
+        officialHosted: false,
+      },
+      [],
+    );
+    const provider = registeredProvider(pi);
+    await restoreCached(provider, [
+      cachedModel("https://api.otari.ai/api/v1"),
+      cachedModel("http://localhost:8001/api/v1", "local:other-model"),
+    ]);
+    expect(provider.getModels()).toEqual([]);
+  });
+
+  it("keeps the OTARI_MODELS baseline while dropping another origin's cache", async () => {
+    const pi = fakePi();
+    registerOtariProvider(
+      pi,
+      {
+        ...config,
+        baseUrl: "https://otari.example.com/api/v1",
+        officialHosted: false,
+        environmentModels: ["anthropic:claude-sonnet-5"],
+      },
+      [],
+    );
+    const provider = registeredProvider(pi);
+    await restoreCached(provider, [cachedModel("https://api.otari.ai/api/v1")]);
+    expect(provider.getModels()).toEqual([
+      expect.objectContaining({
+        id: "anthropic:claude-sonnet-5",
+        baseUrl: "https://otari.example.com/api/v1",
+      }),
     ]);
   });
 

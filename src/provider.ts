@@ -39,6 +39,36 @@ function toRuntimeModel(
   };
 }
 
+/** Origin of a URL, or undefined when it does not parse. */
+function originOf(url: string): string | undefined {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Pi persists discovered models with the base URL they were discovered from
+ * and serves them from that cache before any network refresh. A cached entry
+ * is only evidence about that deployment: after OTARI_BASE_URL moves to a
+ * different origin, keep nothing from the previous one. Entries from the same
+ * origin under another prefix are considered as the same deployment after
+ * an API move (Otari 0.6.0: /v1 to /api/v1) and follow the configured URL.
+ */
+function scopeToBackend<T extends { baseUrl: string }>(
+  models: readonly T[],
+  baseUrl: string,
+): T[] {
+  const origin = originOf(baseUrl);
+  return models.flatMap((model) => {
+    if (model.baseUrl === baseUrl) return [model];
+    if (origin !== undefined && originOf(model.baseUrl) === origin)
+      return [{ ...model, baseUrl }];
+    return [];
+  });
+}
+
 export interface ProviderDependencies {
   fetch?: typeof fetch;
   /** Receives every discovery diagnostic, whether returned or thrown. */
@@ -97,16 +127,9 @@ export function registerOtariProvider(
       streamSimple: streamOtari,
     },
   });
-  // Pi persists discovered models, including each model's baseUrl, and serves
-  // them from that cache before any network refresh. Without the following code,
-  // a URL from an earlier configuration would survive an upgrade or an OTARI_BASE_URL
-  // change until the user logged in again.
   pi.registerProvider({
     ...provider,
-    getModels: () =>
-      provider
-        .getModels()
-        .map((model) => ({ ...model, baseUrl: config.baseUrl })),
+    getModels: () => scopeToBackend(provider.getModels(), config.baseUrl),
   });
   return true;
 }
