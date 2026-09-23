@@ -146,11 +146,22 @@ jobs:
             sed -n '/^not ok - /,$p' live.log 2>/dev/null || true
             echo '```'
             echo
-            echo "After $PAUSE_AFTER consecutive failures the check runs on Mondays only. The workflow updates this issue on each failure and closes it on the first success."
+            echo "After $PAUSE_AFTER consecutive failures the check runs on Mondays only. The workflow keeps this body at the latest failure, adds a comment for each failing run, and closes the issue on the first success."
           } > body.md
+          # The body is the current state; the comments are the history.
+          {
+            echo "Failure date: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo "Run: $RUN_URL"
+            echo "Failing stage: ${stage:-unknown}"
+            echo
+            echo '```text'
+            sed -n '/^\(not \)\{0,1\}ok - /,$p' live.log 2>/dev/null || true
+            echo '```'
+          } > comment.md
           if [[ -n "$NUMBER" ]]; then
             gh issue edit "$NUMBER" --body-file body.md
           else
             gh label create "$ISSUE_LABEL" --description "Opened by the live Otari check while scheduled runs fail" --color d73a4a --force
-            gh issue create --title "Live Otari check is failing" --label "$ISSUE_LABEL" --body-file body.md
+            NUMBER="$(gh issue create --title "Live Otari check is failing" --label "$ISSUE_LABEL" --body-file body.md | sed 's#.*/##')"
           fi
+          gh issue comment "$NUMBER" --body-file comment.md
