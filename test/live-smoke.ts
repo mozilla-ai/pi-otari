@@ -16,7 +16,12 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { ConfigError, loadOtariConfig } from "../src/config.ts";
-import { THINKING_LEVEL_MAP } from "../src/model-mapper.ts";
+import {
+  parseStandardModelList,
+  THINKING_LEVEL_MAP,
+} from "../src/model-mapper.ts";
+import { replacementsFor } from "../src/staleness.ts";
+import type { OtariModel } from "../src/types.ts";
 
 const DEFAULT_MAX_TOKENS = 8;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -26,13 +31,13 @@ const PROMPT = "Reply with exactly: ok";
 const EXTENSION_PATH = resolve(import.meta.dirname, "../src/index.ts");
 const THINKING_LEVELS = Object.keys(THINKING_LEVEL_MAP);
 type LiveThinkingLevel = keyof typeof THINKING_LEVEL_MAP;
+/** Set from Otari's entry alone; the extension fills in a default otherwise. */
 const CAPABILITY_FIELDS = [
   "reasoning",
-  "input_modalities",
-  "modality",
-  "context_window",
-  "max_output_tokens",
-];
+  "input",
+  "contextWindow",
+  "maxTokens",
+] satisfies Array<keyof OtariModel>;
 
 function parseMaxTokens(value: string | undefined): number {
   if (value === undefined || value.trim() === "") return DEFAULT_MAX_TOKENS;
@@ -74,15 +79,23 @@ function parseGateway(token: string | undefined, baseUrl: string | undefined) {
 
 /** The stage in progress, which a failure or the watchdog reports by name. */
 let running = "";
+/** Detail lines from the stage in progress, printed under its result line. */
+let notes: string[] = [];
+
+function note(text: string): void {
+  notes.push(`  ${text}`);
+}
 
 /**
- * One line per passed stage. A failure propagates to the end of the script,
- * so Pi's state is removed on the way out.
+ * One line per passed stage, then its notes. A failure propagates to the end
+ * of the script, so Pi's state is removed on the way out.
  */
 async function stage<T>(name: string, run: () => Promise<T>): Promise<T> {
   running = name;
+  notes = [];
   const result = await run();
   console.log(`ok - ${name}`);
+  for (const line of notes) console.log(line);
   return result;
 }
 
@@ -97,12 +110,6 @@ function reasonOf(error: unknown): string {
 function excerpt(text: string, limit = 500): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
   return collapsed.length > limit ? `${collapsed.slice(0, limit)}…` : collapsed;
-}
-
-/** The model half of a `provider:model` selector, split at the first colon. */
-function modelPart(selector: string): string {
-  const separator = selector.indexOf(":");
-  return separator === -1 ? selector : selector.slice(separator + 1);
 }
 
 async function main(): Promise<void> {
@@ -124,17 +131,17 @@ async function main(): Promise<void> {
         model,
         "Set OTARI_LIVE_TEST_MODEL to a model selector that gateway lists, for example nebius:Qwen/Qwen3-30B-A3B-Instruct-2507",
       );
-      console.log(
-        `  ${baseUrl}, model ${model}, ${maxTokens} output tokens${reasoning ? `, reasoning ${reasoning}` : ""}`,
+      note(
+        `${baseUrl}, model ${model}, ${maxTokens} output tokens${reasoning ? `, reasoning ${reasoning}` : ""}`,
       );
       return { token, model, baseUrl, maxTokens, reasoning };
     },
   );
 
   /**
-   * Otari does not yet publish capability metadata (#6). Say which fields
-   * the entry carries, so the run shows the day they appear and nothing fails
-   * on their absence until then.
+   * Otari does not yet publish capability metadata (#6). Say which fields the
+   * extension read from the model's entry, so the run shows the day they
+   * appear and nothing fails on their absence until then.
    */
   async function capabilityFields(): Promise<string> {
     try {
@@ -147,12 +154,11 @@ async function main(): Promise<void> {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const payload = (await response.json()) as {
-        data?: Array<Record<string, unknown>>;
-      };
-      const entry = payload.data?.find((item) => item.id === model);
+      const entry = parseStandardModelList(await response.json()).find(
+        (item) => item.id === model,
+      );
       const present = CAPABILITY_FIELDS.filter(
-        (field) => entry?.[field] !== undefined && entry?.[field] !== null,
+        (field) => entry?.[field] !== undefined,
       );
       return present.length > 0 ? present.join(", ") : "none";
     } catch (error) {
@@ -192,11 +198,15 @@ async function main(): Promise<void> {
       }
       process.env.OTARI_API_KEY = token;
       process.env.OTARI_BASE_URL = baseUrl;
-      // One request per prompt: a gateway error is the finding, so Pi's turn
-      // retries stay off for this session.
+      // One request per prompt: a gateway error or a truncated reply is the
+      // finding, so Pi's turn retries and compact-and-retry stay off for this
+      // session.
       await writeFile(
         join(agentDir, "settings.json"),
-        JSON.stringify({ retry: { enabled: false } }),
+        JSON.stringify({
+          retry: { enabled: false },
+          compaction: { enabled: false },
+        }),
       );
       const resourceLoader = new DefaultResourceLoader({
         cwd,
@@ -255,9 +265,7 @@ async function main(): Promise<void> {
           const listed = models.map((item) => item.id);
           const selected = models.find((item) => item.id === model);
           if (!selected) {
-            const alternates = listed.filter(
-              (id) => modelPart(id) === modelPart(model),
-            );
+            const alternates = replacementsFor(model, new Set(listed));
             const hint =
               alternates.length > 0
                 ? `The same model is listed as ${alternates.map((id) => `"${id}"`).join(" and ")}; set OTARI_LIVE_TEST_MODEL to one of those.`
@@ -266,12 +274,10 @@ async function main(): Promise<void> {
               `Otari at ${baseUrl} does not list "${model}". ${hint}`,
             );
           }
-          console.log(`  ${listed.length} models listed, including ${model}`);
-          console.log(
-            `  capability fields from Otari: ${await capabilityFields()}`,
-          );
-          console.log(
-            `  registered in Pi as: reasoning ${selected.reasoning ? "on" : "off"}, input ${selected.input.join("+")}, context ${selected.contextWindow}, max output ${selected.maxTokens}`,
+          note(`${listed.length} models listed, including ${model}`);
+          note(`capability fields from Otari: ${await capabilityFields()}`);
+          note(
+            `registered in Pi as: reasoning ${selected.reasoning ? "on" : "off"}, input ${selected.input.join("+")}, context ${selected.contextWindow}, max output ${selected.maxTokens}`,
           );
           return selected;
         },
@@ -330,7 +336,7 @@ async function main(): Promise<void> {
             `${model} returned no text. Response: ${excerpt(JSON.stringify(payload))}`,
           );
         }
-        console.log(`  ${model} replied: ${excerpt(text, 80)}`);
+        note(`${model} replied: ${excerpt(text, 80)}`);
       });
 
       /**
@@ -395,9 +401,9 @@ async function main(): Promise<void> {
           `${model} streamed no text. Content: ${excerpt(JSON.stringify(reply.content))}`,
         );
         const thinking = reply.content.some((part) => part.type === "thinking");
-        console.log(`  ${model} replied: ${excerpt(text, 80)}`);
-        console.log(
-          `  thinking level ${session.state.thinkingLevel}${thinking ? ", reasoning content streamed" : ""}; ${reply.usage.input} input, ${reply.usage.output} output tokens`,
+        note(`${model} replied: ${excerpt(text, 80)}`);
+        note(
+          `thinking level ${session.state.thinkingLevel}${thinking ? ", reasoning content streamed" : ""}; ${reply.usage.input} input, ${reply.usage.output} output tokens`,
         );
       });
     } finally {
@@ -414,6 +420,7 @@ try {
   console.log("Live Otari smoke test passed");
 } catch (error) {
   console.error(`not ok - ${running}`);
+  for (const line of notes) console.error(line);
   console.error(reasonOf(error));
   process.exitCode = 1;
 }

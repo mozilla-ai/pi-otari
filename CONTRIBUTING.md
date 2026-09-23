@@ -67,7 +67,7 @@ The stages, in order:
 
 1. **configuration**: the variables below are read, with the token and URL going through the extension's own configuration parser, so a URL the extension would reject fails here with its reason.
 2. **extension loads in a Pi session**: Pi loads `src/index.ts` by path, the way `pi -e` does, into a session whose state lives in temporary directories. Fails when the extension registers no provider.
-3. **model discovery through the extension**: Pi refreshes the Otari catalog over the network. Fails with the extension's own diagnostic, or when the configured model is missing from the list, naming the current selector when the same model is listed under another prefix. Also reports which capability fields Otari returned for the model and what Pi registered.
+3. **model discovery through the extension**: Pi refreshes the Otari catalog over the network. Fails with the extension's own diagnostic, or when the configured model is missing from the list, naming the current selector when the same model is listed under another prefix. Also reports which capability fields the extension read from Otari's entry for the model, and what Pi registered.
 4. **non-streaming completion**: one plain request outside Pi. Otari's reason for a rejection travels in a `detail` field that Pi's client does not display, so this stage shows it.
 5. **streaming completion through Pi**: one prompt through Pi's agent loop, the extension's stream wrapper, and pi-ai's streaming client, with the model's output capped at the configured bound. Fails on an error reply, a truncated reply, or more than one request for the prompt.
 
