@@ -1,0 +1,66 @@
+name: Live Otari check
+
+# Runs test/live-smoke.ts against hosted Otari with a key from repository
+# secrets. Pull requests never trigger it, so the key stays out of untrusted
+# code; see CONTRIBUTING.md.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model selector the gateway lists (default from the OTARI_LIVE_TEST_MODEL variable)
+        type: string
+        default: ""
+      max_tokens:
+        description: Output cap for both completions (default 8)
+        type: string
+        default: ""
+      reasoning:
+        description: "Thinking level to send: minimal, low, medium, high, xhigh, or max (default none)"
+        type: string
+        default: ""
+  schedule:
+    # Weekdays at 06:00 UTC
+    - cron: "0 6 * * 1-5"
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: Live smoke test against hosted Otari
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the live check
+        shell: bash
+        env:
+          OTARI_LIVE_TEST_TOKEN: ${{ secrets.OTARI_LIVE_TEST_TOKEN }}
+          OTARI_LIVE_TEST_MODEL: ${{ inputs.model || vars.OTARI_LIVE_TEST_MODEL || 'nebius:Qwen/Qwen3-30B-A3B-Instruct-2507' }}
+          OTARI_LIVE_TEST_MAX_TOKENS: ${{ inputs.max_tokens }}
+          OTARI_LIVE_TEST_REASONING: ${{ inputs.reasoning }}
+        run: npm run test:live 2>&1 | tee live.log
+
+      - name: Show the stage lines on the run page
+        if: always()
+        shell: bash
+        run: |
+          test -f live.log || exit 0
+          # A failed stage becomes an annotation: its line and the reason after it.
+          awk '/^not ok - / { reason = ""; if ((getline line) > 0) reason = ": " line; print "::error::" $0 reason }' live.log
+          {
+            echo '```'
+            cat live.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

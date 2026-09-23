@@ -61,7 +61,7 @@ OTARI_MODELS=<model id> pi --no-extensions -e ./src/index.ts --no-session -p \
 
 ## Check compatibility with a live gateway
 
-`npm run test:live` runs the extension against a real Otari gateway and stops at the first failing stage, printing the gateway's own reason where there is one. It sends two requests to the model list and two completions capped at the output bound. Run it before requesting review when a change touches discovery, the provider, streaming, or URL handling; the offline suite behind `npm run check` needs no credentials and is what CI runs.
+`npm run test:live` runs the extension against a real Otari gateway and stops at the first failing stage, printing the gateway's own reason where there is one. It sends two requests to the model list and two completions capped at the output bound. Run it before requesting review when a change touches discovery, the provider, streaming, or URL handling; the offline suite behind `npm run check` needs no credentials and is what CI runs on pull requests.
 
 The stages, in order:
 
@@ -99,6 +99,8 @@ npm run test:live
 ```
 
 The script removes every `OTARI_*` variable from its own environment and sets the live token and URL before Pi loads the extension, so the `OTARI_*` variables in your shell do not affect the run. Nothing under `~/.pi` is read or written.
+
+The same check runs against hosted Otari in GitHub Actions as the `Live Otari check` workflow: every weekday morning, and on demand from the Actions tab, where the model, output cap, and thinking level can be set for one run. The key comes from the `OTARI_LIVE_TEST_TOKEN` repository secret and the default model from the `OTARI_LIVE_TEST_MODEL` repository variable, falling back to the selector in the example above. Pull requests never run it, so the key stays out of untrusted code. Each run's `ok -` lines appear in the run summary.
 
 ## Change dependencies
 
