@@ -100,7 +100,9 @@ npm run test:live
 
 The script removes every `OTARI_*` variable from its own environment and sets the live token and URL before Pi loads the extension, so the `OTARI_*` variables in your shell do not affect the run. Nothing under `~/.pi` is read or written.
 
-The same check runs against hosted Otari in GitHub Actions as the `Live Otari check` workflow: every weekday morning, and on demand from the Actions tab, where the model, output cap, and thinking level can be set for one run. The key comes from the `OTARI_LIVE_TEST_TOKEN` repository secret and the default model from the `OTARI_LIVE_TEST_MODEL` repository variable, falling back to the selector in the example above. Pull requests never run it, so the key stays out of untrusted code. Each run's `ok -` lines appear in the run summary.
+The same check runs against hosted Otari in GitHub Actions as the `Live Otari check` workflow: every weekday morning, and on demand from the Actions tab, where the model, output cap, and thinking level can be set for one run. The key comes from the `OTARI_LIVE_TEST_TOKEN` repository secret and the default model from the `OTARI_LIVE_TEST_MODEL` repository variable, falling back to the selector in the example above. Pull requests never run it, so the key stays out of untrusted code. Each run's `ok -` lines appear in the run summary, and a failed stage is annotated on the run page.
+
+A failed scheduled run opens an issue labelled `live-check` with the failing stage and a link to the run. Further failures update that issue with the latest run and the consecutive count rather than opening new issues, and the first passing scheduled run closes it. After five consecutive failures the scheduled check runs on Mondays only until it passes again. Manual runs leave the issue alone unless started with the `as_scheduled` option, which exists to test this flow.
 
 ## Change dependencies
 
