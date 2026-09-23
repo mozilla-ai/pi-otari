@@ -86,6 +86,14 @@ async function stage<T>(name: string, run: () => Promise<T>): Promise<T> {
   return result;
 }
 
+/** The message, followed by the messages of the causes behind it. */
+function reasonOf(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  return error.cause === undefined
+    ? error.message
+    : `${error.message}: ${reasonOf(error.cause)}`;
+}
+
 function excerpt(text: string, limit = 500): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
   return collapsed.length > limit ? `${collapsed.slice(0, limit)}…` : collapsed;
@@ -124,34 +132,32 @@ async function main(): Promise<void> {
   );
 
   /**
-   * Otari does not yet publish capability metadata (#6). Say what the entry
-   * carries and what Pi registered, so the run shows the day the fields appear
-   * and nothing fails on their absence until then.
+   * Otari does not yet publish capability metadata (#6). Say which fields
+   * the entry carries, so the run shows the day they appear and nothing fails
+   * on their absence until then.
    */
-  async function reportCapabilities(registered: {
-    reasoning: boolean;
-    input: readonly string[];
-    contextWindow: number;
-    maxTokens: number;
-  }): Promise<void> {
-    const response = await fetch(`${baseUrl}/models`, {
-      headers: { authorization: `Bearer ${token}`, accept: "application/json" },
-      redirect: "error",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    const payload = (await response.json()) as {
-      data?: Array<Record<string, unknown>>;
-    };
-    const entry = payload.data?.find((item) => item.id === model);
-    const present = CAPABILITY_FIELDS.filter(
-      (field) => entry?.[field] !== undefined && entry?.[field] !== null,
-    );
-    console.log(
-      `  capability fields from Otari: ${present.length > 0 ? present.join(", ") : "none"}`,
-    );
-    console.log(
-      `  registered in Pi as: reasoning ${registered.reasoning ? "on" : "off"}, input ${registered.input.join("+")}, context ${registered.contextWindow}, max output ${registered.maxTokens}`,
-    );
+  async function capabilityFields(): Promise<string> {
+    try {
+      const response = await fetch(`${baseUrl}/models`, {
+        headers: {
+          authorization: `Bearer ${token}`,
+          accept: "application/json",
+        },
+        redirect: "error",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = (await response.json()) as {
+        data?: Array<Record<string, unknown>>;
+      };
+      const entry = payload.data?.find((item) => item.id === model);
+      const present = CAPABILITY_FIELDS.filter(
+        (field) => entry?.[field] !== undefined && entry?.[field] !== null,
+      );
+      return present.length > 0 ? present.join(", ") : "none";
+    } catch (error) {
+      return `not read (${reasonOf(error)})`;
+    }
   }
 
   // Pi's state for the run: its settings and credential store, and a working
@@ -261,7 +267,12 @@ async function main(): Promise<void> {
             );
           }
           console.log(`  ${listed.length} models listed, including ${model}`);
-          await reportCapabilities(selected);
+          console.log(
+            `  capability fields from Otari: ${await capabilityFields()}`,
+          );
+          console.log(
+            `  registered in Pi as: reasoning ${selected.reasoning ? "on" : "off"}, input ${selected.input.join("+")}, context ${selected.contextWindow}, max output ${selected.maxTokens}`,
+          );
           return selected;
         },
       );
@@ -291,10 +302,7 @@ async function main(): Promise<void> {
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           });
         } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
-          throw new Error(
-            `No response from ${url} within ${REQUEST_TIMEOUT_MS / 1000} s: ${reason}. Check that the gateway is reachable and OTARI_LIVE_TEST_BASE_URL includes its API prefix`,
-          );
+          throw new Error(`No response from ${url}`, { cause: error });
         }
         if (!response.ok) {
           throw new Error(
@@ -406,6 +414,6 @@ try {
   console.log("Live Otari smoke test passed");
 } catch (error) {
   console.error(`not ok - ${running}`);
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error(reasonOf(error));
   process.exitCode = 1;
 }
