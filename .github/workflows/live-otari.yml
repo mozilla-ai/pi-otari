@@ -1,0 +1,156 @@
+name: Live Otari check
+
+# Runs test/live-smoke.ts against hosted Otari with a key from repository
+# secrets. Pull requests never trigger it, so the key stays out of untrusted
+# code. Scheduled failures are tracked in one issue per outage; see
+# CONTRIBUTING.md.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model selector the gateway lists (default from the OTARI_LIVE_TEST_MODEL variable)
+        type: string
+        default: ""
+      max_tokens:
+        description: Output cap for both completions (default 8)
+        type: string
+        default: ""
+      reasoning:
+        description: "Thinking level to send: minimal, low, medium, high, xhigh, or max (default none)"
+        type: string
+        default: ""
+      as_scheduled:
+        description: Record the outcome in the outage issue as a scheduled run would (for testing that flow)
+        type: boolean
+        default: false
+  schedule:
+    # Weekdays at 06:00 UTC
+    - cron: "0 6 * * 1-5"
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  # Only scheduled runs open, update, or close the outage issue.
+  TRACKED: ${{ github.event_name == 'schedule' || inputs.as_scheduled == true }}
+  ISSUE_LABEL: live-check
+  PAUSE_AFTER: 5
+
+jobs:
+  outage:
+    name: Read the outage issue
+    runs-on: ubuntu-latest
+    outputs:
+      number: ${{ steps.issue.outputs.number }}
+      failures: ${{ steps.issue.outputs.failures }}
+      first: ${{ steps.issue.outputs.first }}
+      skip: ${{ steps.issue.outputs.skip }}
+    steps:
+      - name: Read the open outage issue
+        id: issue
+        if: env.TRACKED == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          issue="$(gh issue list --label "$ISSUE_LABEL" --state open --limit 1 --json number,body --jq '.[0] // {}')"
+          body="$(jq -r '.body // ""' <<<"$issue")"
+          failures="$(sed -n 's/^Consecutive failed scheduled runs: \([0-9][0-9]*\).*/\1/p' <<<"$body" | head -1)"
+          failures="${failures:-0}"
+          {
+            echo "number=$(jq -r '.number // empty' <<<"$issue")"
+            echo "failures=$failures"
+            echo "first=$(sed -n 's/^First failure: //p' <<<"$body" | head -1)"
+          } >> "$GITHUB_OUTPUT"
+          # After PAUSE_AFTER failures the check runs on Mondays only, so the
+          # outage stays observed without a failure every day.
+          if (( failures >= PAUSE_AFTER )) && [[ "$(date -u +%u)" != 1 ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Paused after $failures consecutive failures; the check runs again on Monday"
+          fi
+
+  live:
+    name: Live smoke test against hosted Otari
+    needs: outage
+    if: needs.outage.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the live check
+        id: live
+        shell: bash
+        env:
+          OTARI_LIVE_TEST_TOKEN: ${{ secrets.OTARI_LIVE_TEST_TOKEN }}
+          OTARI_LIVE_TEST_MODEL: ${{ inputs.model || vars.OTARI_LIVE_TEST_MODEL || 'nebius:Qwen/Qwen3-30B-A3B-Instruct-2507' }}
+          OTARI_LIVE_TEST_MAX_TOKENS: ${{ inputs.max_tokens }}
+          OTARI_LIVE_TEST_REASONING: ${{ inputs.reasoning }}
+        run: npm run test:live 2>&1 | tee live.log
+
+      - name: Show the stage lines on the run page
+        if: always()
+        shell: bash
+        run: |
+          test -f live.log || exit 0
+          # A failed stage becomes an annotation: its line and the reason after it.
+          awk '/^not ok - / { reason = ""; if ((getline line) > 0) reason = ": " line; print "::error::" $0 reason }' live.log
+          {
+            echo '```'
+            cat live.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record the outcome in the outage issue
+        if: ${{ !cancelled() && env.TRACKED == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OUTCOME: ${{ steps.live.outcome }}
+          NUMBER: ${{ needs.outage.outputs.number }}
+          FAILURES: ${{ needs.outage.outputs.failures }}
+          FIRST: ${{ needs.outage.outputs.first }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [[ "$OUTCOME" == "success" ]]; then
+            if [[ -n "$NUMBER" ]]; then
+              gh issue close "$NUMBER" --comment "The scheduled live check passed again: $RUN_URL"
+            fi
+            exit 0
+          fi
+          # Only a failed check is an outage; a failed install is not.
+          [[ "$OUTCOME" == "failure" ]] || exit 0
+          stage="$(sed -n 's/^not ok - //p' live.log 2>/dev/null | head -1)"
+          {
+            echo "The scheduled live check against hosted Otari is failing."
+            echo
+            echo "Consecutive failed scheduled runs: $(( FAILURES + 1 ))"
+            echo "First failure: ${FIRST:-$(date -u +%F)}"
+            echo "Latest run: $RUN_URL"
+            echo "Failing stage: ${stage:-unknown}"
+            echo
+            echo '```text'
+            sed -n '/^not ok - /,$p' live.log 2>/dev/null || true
+            echo '```'
+            echo
+            echo "After $PAUSE_AFTER consecutive failures the check runs on Mondays only. The workflow updates this issue on each failure and closes it on the first success."
+          } > body.md
+          if [[ -n "$NUMBER" ]]; then
+            gh issue edit "$NUMBER" --body-file body.md
+          else
+            gh label create "$ISSUE_LABEL" --description "Opened by the live Otari check while scheduled runs fail" --color d73a4a --force
+            gh issue create --title "Live Otari check is failing" --label "$ISSUE_LABEL" --body-file body.md
+          fi

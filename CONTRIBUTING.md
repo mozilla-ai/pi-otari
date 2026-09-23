@@ -58,7 +58,51 @@ OTARI_MODELS=<model id> pi --no-extensions -e ./src/index.ts --no-session -p \
   --model "otari/<model id>" "Reply with exactly: ok"
 ```
 
-`npm run test:live` sends a single request straight to a gateway. Set `OTARI_LIVE_TEST_TOKEN` and `OTARI_LIVE_TEST_MODEL`, and `OTARI_LIVE_TEST_BASE_URL` to target a local gateway. Pick a plain instruct model: the request allows only a few output tokens, which reasoning models spend before producing text.
+
+## Check compatibility with a live gateway
+
+`npm run test:live` runs the extension against a real Otari gateway and stops at the first failing stage, printing the gateway's own reason where there is one. It sends two requests to the model list and two completions capped at the output bound. Run it before requesting review when a change touches discovery, the provider, streaming, or URL handling; the offline suite behind `npm run check` needs no credentials and is what CI runs on pull requests.
+
+The stages, in order:
+
+1. **configuration**: the variables below are read, with the token and URL going through the extension's own configuration parser, so a URL the extension would reject fails here with its reason.
+2. **extension loads in a Pi session**: Pi loads `src/index.ts` by path, the way `pi -e` does, into a session whose state lives in temporary directories. Fails when the extension registers no provider.
+3. **model discovery through the extension**: Pi refreshes the Otari catalog over the network. Fails with the extension's own diagnostic, or when the configured model is missing from the list, naming the current selector when the same model is listed under another prefix. Also reports which capability fields the extension read from Otari's entry for the model, and what Pi registered.
+4. **non-streaming completion**: one plain request outside Pi, so a rejection shows Otari's own reason, which Pi's client does not display.
+5. **streaming completion through Pi**: one prompt through Pi's agent loop, the extension's stream wrapper, and pi-ai's streaming client, with the model's output capped at the configured bound. Fails on an error reply, a truncated reply, more than one request for the prompt, or, with a reasoning level set, a reply without reasoning content.
+
+| Variable | Default | Description |
+|---|---|---|
+| `OTARI_LIVE_TEST_TOKEN` | required | API key for the gateway under test. Use a disposable key. |
+| `OTARI_LIVE_TEST_MODEL` | required | A selector that gateway lists. Prefer an instruct model: reasoning models spend the output cap before producing text. |
+| `OTARI_LIVE_TEST_BASE_URL` | `https://api.otari.ai/api/v1` | Gateway URL including its API prefix. |
+| `OTARI_LIVE_TEST_MAX_TOKENS` | `8` | Output cap for both completions. |
+| `OTARI_LIVE_TEST_REASONING` | unset | One of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Otari does not yet mark models as reasoning-capable, so the run marks the selected model itself, sends the level, and fails unless the reply carries reasoning content. Pair it with a reasoning model and raise the output cap. |
+
+Against hosted Otari:
+
+```bash
+OTARI_LIVE_TEST_TOKEN=your_otari_key \
+OTARI_LIVE_TEST_MODEL=nebius:Qwen/Qwen3-30B-A3B-Instruct-2507 \
+npm run test:live
+```
+
+Against a gateway on your machine, with a reasoning model:
+
+```bash
+OTARI_LIVE_TEST_TOKEN=your_local_key \
+OTARI_LIVE_TEST_BASE_URL=http://localhost:8000/api/v1 \
+OTARI_LIVE_TEST_MODEL=llamafile:qwen3.8-flash-next-reasoner \
+OTARI_LIVE_TEST_REASONING=low \
+OTARI_LIVE_TEST_MAX_TOKENS=512 \
+npm run test:live
+```
+
+The script removes every `OTARI_*` variable from its own environment and sets the live token and URL before Pi loads the extension, so the `OTARI_*` variables in your shell do not affect the run. Nothing under `~/.pi` is read or written.
+
+The same check runs against hosted Otari in GitHub Actions as the `Live Otari check` workflow: every weekday morning, and on demand from the Actions tab, where the model, output cap, and thinking level can be set for one run. The key comes from the `OTARI_LIVE_TEST_TOKEN` repository secret and the default model from the `OTARI_LIVE_TEST_MODEL` repository variable, falling back to the selector in the example above. Pull requests never run it, so the key stays out of untrusted code. Each run's `ok -` lines appear in the run summary, and a failed stage is annotated on the run page.
+
+A failed scheduled run opens an issue labelled `live-check` with the failing stage and a link to the run. Further failures update that issue with the latest run and the consecutive count rather than opening new issues, and the first passing scheduled run closes it. After five consecutive failures the scheduled check runs on Mondays only until it passes again. Manual runs leave the issue alone unless started with the `as_scheduled` option, which exists to test this flow.
 
 ## Change dependencies
 
@@ -69,6 +113,7 @@ Use `npm install` when adding, removing, or upgrading dependencies, and commit b
 - Keep changes focused on one concern.
 - Do not commit API keys or other credentials.
 - Include tests or documentation when behavior changes.
+- For a change to discovery, the provider, streaming, or URL handling, run `npm run test:live` against hosted Otari, and against a self-hosted gateway if you have one, and paste its `ok -` lines in the pull request description.
 - Confirm the `Validate package` GitHub Actions job passes.
 
 ## Release a version
