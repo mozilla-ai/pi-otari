@@ -68,8 +68,8 @@ The stages, in order:
 1. **configuration**: the variables below are read, with the token and URL going through the extension's own configuration parser, so a URL the extension would reject fails here with its reason.
 2. **extension loads in a Pi session**: Pi loads `src/index.ts` by path, the way `pi -e` does, into a session whose state lives in temporary directories. Fails when the extension registers no provider.
 3. **model discovery through the extension**: Pi refreshes the Otari catalog over the network. Fails with the extension's own diagnostic, or when the configured model is missing from the list, naming the current selector when the same model is listed under another prefix. Also reports which capability fields the extension read from Otari's entry for the model, and what Pi registered.
-4. **non-streaming completion**: one plain request outside Pi. Otari's reason for a rejection travels in a `detail` field that Pi's client does not display, so this stage shows it.
-5. **streaming completion through Pi**: one prompt through Pi's agent loop, the extension's stream wrapper, and pi-ai's streaming client, with the model's output capped at the configured bound. Fails on an error reply, a truncated reply, or more than one request for the prompt.
+4. **non-streaming completion**: one plain request outside Pi, so a rejection shows Otari's own reason, which Pi's client does not display.
+5. **streaming completion through Pi**: one prompt through Pi's agent loop, the extension's stream wrapper, and pi-ai's streaming client, with the model's output capped at the configured bound. Fails on an error reply, a truncated reply, more than one request for the prompt, or, with a reasoning level set, a reply without reasoning content.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -77,7 +77,7 @@ The stages, in order:
 | `OTARI_LIVE_TEST_MODEL` | required | A selector that gateway lists. Prefer an instruct model: reasoning models spend the output cap before producing text. |
 | `OTARI_LIVE_TEST_BASE_URL` | `https://api.otari.ai/api/v1` | Gateway URL including its API prefix. |
 | `OTARI_LIVE_TEST_MAX_TOKENS` | `8` | Output cap for both completions. |
-| `OTARI_LIVE_TEST_REASONING` | unset | One of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Otari does not yet mark models as reasoning-capable, so the run marks the selected model itself and sends the level. Raise the output cap alongside it. |
+| `OTARI_LIVE_TEST_REASONING` | unset | One of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Otari does not yet mark models as reasoning-capable, so the run marks the selected model itself, sends the level, and fails unless the reply carries reasoning content. Pair it with a reasoning model and raise the output cap. |
 
 Against hosted Otari:
 

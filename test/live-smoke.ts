@@ -31,7 +31,7 @@ const PROMPT = "Reply with exactly: ok";
 const EXTENSION_PATH = resolve(import.meta.dirname, "../src/index.ts");
 const THINKING_LEVELS = Object.keys(THINKING_LEVEL_MAP);
 type LiveThinkingLevel = keyof typeof THINKING_LEVEL_MAP;
-/** Set from Otari's entry alone; the extension fills in a default otherwise. */
+/** Fields the extension takes from Otari's entry rather than defaulting. */
 const CAPABILITY_FIELDS = [
   "reasoning",
   "input",
@@ -77,28 +77,6 @@ function parseGateway(token: string | undefined, baseUrl: string | undefined) {
   }
 }
 
-/** The stage in progress, which a failure or the watchdog reports by name. */
-let running = "";
-/** Detail lines from the stage in progress, printed under its result line. */
-let notes: string[] = [];
-
-function note(text: string): void {
-  notes.push(`  ${text}`);
-}
-
-/**
- * One line per passed stage, then its notes. A failure propagates to the end
- * of the script, so Pi's state is removed on the way out.
- */
-async function stage<T>(name: string, run: () => Promise<T>): Promise<T> {
-  running = name;
-  notes = [];
-  const result = await run();
-  console.log(`ok - ${name}`);
-  for (const line of notes) console.log(line);
-  return result;
-}
-
 /** The message, followed by the messages of the causes behind it. */
 function reasonOf(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
@@ -112,10 +90,43 @@ function excerpt(text: string, limit = 500): string {
   return collapsed.length > limit ? `${collapsed.slice(0, limit)}…` : collapsed;
 }
 
+/** The stage in progress, which the watchdog reports by name. */
+let running = "";
+
+/** Thrown by stage() once it has printed a failure, so nothing prints twice. */
+class StageFailure extends Error {}
+
+/**
+ * One line per stage, then the notes its body collected. A failure is
+ * reported here and propagates to the end of the script, so Pi's state is
+ * removed on the way out.
+ */
+async function stage<T>(
+  name: string,
+  run: (note: (text: string) => void) => Promise<T>,
+): Promise<T> {
+  running = name;
+  const notes: string[] = [];
+  const note = (text: string) => {
+    notes.push(`  ${text}`);
+  };
+  try {
+    const result = await run(note);
+    console.log(`ok - ${name}`);
+    for (const line of notes) console.log(line);
+    return result;
+  } catch (error) {
+    console.error(`not ok - ${name}`);
+    for (const line of notes) console.error(line);
+    console.error(reasonOf(error));
+    throw new StageFailure(name);
+  }
+}
+
 async function main(): Promise<void> {
   const { token, model, baseUrl, maxTokens, reasoning } = await stage(
     "configuration",
-    async () => {
+    async (note) => {
       const model = process.env.OTARI_LIVE_TEST_MODEL?.trim();
       const maxTokens = parseMaxTokens(process.env.OTARI_LIVE_TEST_MAX_TOKENS);
       const reasoning = parseReasoning(process.env.OTARI_LIVE_TEST_REASONING);
@@ -139,9 +150,8 @@ async function main(): Promise<void> {
   );
 
   /**
-   * Otari does not yet publish capability metadata (#6). Say which fields the
-   * extension read from the model's entry, so the run shows the day they
-   * appear and nothing fails on their absence until then.
+   * The capability fields Otari's entry carries (#6). The extension defaults
+   * the rest, so this is a note rather than a check until Otari publishes them.
    */
   async function capabilityFields(): Promise<string> {
     try {
@@ -167,7 +177,7 @@ async function main(): Promise<void> {
   }
 
   // Pi's state for the run: its settings and credential store, and a working
-  // directory. Both go at the end, whichever way the run ends.
+  // directory. Both are removed when the run ends.
   const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-live-"));
   const cwd = await mkdtemp(join(tmpdir(), "pi-otari-live-cwd-"));
   const removeState = () =>
@@ -186,21 +196,16 @@ async function main(): Promise<void> {
   }, RUN_TIMEOUT_MS);
 
   try {
-    /**
-     * The extension reads its configuration from the environment when Pi
-     * loads it, so the live values are the only OTARI_* variables left to
-     * read.
-     */
     const session = await stage("extension loads in a Pi session", async () => {
+      // Only the live token and URL reach the extension's environment.
       for (const key of Object.keys(process.env)) {
         if (key.startsWith("OTARI_") && !key.startsWith("OTARI_LIVE_TEST_"))
           delete process.env[key];
       }
       process.env.OTARI_API_KEY = token;
       process.env.OTARI_BASE_URL = baseUrl;
-      // One request per prompt: a gateway error or a truncated reply is the
-      // finding, so Pi's turn retries and compact-and-retry stay off for this
-      // session.
+      // Retries and compact-and-retry stay off, so the first reply is the one
+      // checked.
       await writeFile(
         join(agentDir, "settings.json"),
         JSON.stringify({
@@ -208,10 +213,16 @@ async function main(): Promise<void> {
           compaction: { enabled: false },
         }),
       );
+      // Only the extension under test loads; nothing from the developer's
+      // home directory reaches the session.
       const resourceLoader = new DefaultResourceLoader({
         cwd,
         agentDir,
         noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
         additionalExtensionPaths: [EXTENSION_PATH],
       });
       await resourceLoader.reload();
@@ -243,20 +254,19 @@ async function main(): Promise<void> {
     try {
       /**
        * Discovery as Pi performs it: the extension's fetchModels against the
-       * configured URL, parsed and registered through the provider. A selector
-       * the list omits is the #41 situation, so name the current selector when
-       * the same model is listed under another prefix.
+       * configured URL, parsed and registered through the provider. When the
+       * selector is missing, name the listed selector for the same model (#41).
        */
       const discovered = await stage(
         "model discovery through the extension",
-        async () => {
+        async (note) => {
           const result = await session.modelRuntime.refresh({
             providers: ["otari"],
             allowNetwork: true,
             force: true,
           });
           const failure = result.errors.get("otari");
-          if (failure) throw new Error(failure.message);
+          if (failure) throw failure;
           const models = session.modelRuntime.getModels("otari");
           assert.ok(
             models.length > 0,
@@ -288,7 +298,7 @@ async function main(): Promise<void> {
        * `detail` field that Pi's OpenAI client does not display, so this is
        * the stage that shows it when inference fails for a listed model.
        */
-      await stage("non-streaming completion", async () => {
+      await stage("non-streaming completion", async (note) => {
         const url = `${baseUrl}/chat/completions`;
         let response: Response;
         try {
@@ -299,7 +309,7 @@ async function main(): Promise<void> {
               "content-type": "application/json",
             },
             body: JSON.stringify({
-              model: discovered.id,
+              model,
               messages: [{ role: "user", content: PROMPT }],
               max_tokens: maxTokens,
               stream: false,
@@ -341,14 +351,14 @@ async function main(): Promise<void> {
 
       /**
        * The prompt travels as a user's does: Pi's agent loop, the extension's
-       * stream wrapper, and pi-ai's streaming client, against the discovered
-       * model with its output capped at the configured bound. Otari publishes
-       * no reasoning flag yet (#6), so the extension registers every model
-       * without reasoning and Pi would clamp any level to off. The opt-in
-       * registers the copy as the extension registers a reasoning model, so
-       * the requested level reaches the gateway through the same transport.
+       * stream wrapper, and pi-ai's streaming client, with output capped at
+       * the configured bound. Otari publishes no reasoning flag yet (#6), so
+       * the extension registers every model with reasoning off and Pi would
+       * clamp the level. Mark the copy the way the extension marks a reasoning
+       * model, so the level reaches the gateway through the same transport
+       * and the reply carries reasoning content.
        */
-      await stage("streaming completion through Pi", async () => {
+      await stage("streaming completion through Pi", async (note) => {
         const selected = {
           ...discovered,
           maxTokens,
@@ -357,14 +367,7 @@ async function main(): Promise<void> {
             : {}),
         };
         await session.setModel(selected);
-        if (reasoning) {
-          session.setThinkingLevel(reasoning);
-          assert.equal(
-            session.state.thinkingLevel,
-            reasoning,
-            `Pi offers ${session.getAvailableThinkingLevels().join(", ")} for ${model}`,
-          );
-        }
+        if (reasoning) session.setThinkingLevel(reasoning);
         const before = session.state.messages.length;
         await session.prompt(PROMPT);
         const replies = session.state.messages
@@ -401,6 +404,12 @@ async function main(): Promise<void> {
           `${model} streamed no text. Content: ${excerpt(JSON.stringify(reply.content))}`,
         );
         const thinking = reply.content.some((part) => part.type === "thinking");
+        if (reasoning) {
+          assert.ok(
+            thinking,
+            `${model} streamed no reasoning content at level ${reasoning}. Set OTARI_LIVE_TEST_MODEL to a model that returns reasoning content, or leave OTARI_LIVE_TEST_REASONING unset`,
+          );
+        }
         note(`${model} replied: ${excerpt(text, 80)}`);
         note(
           `thinking level ${session.state.thinkingLevel}${thinking ? ", reasoning content streamed" : ""}; ${reply.usage.input} input, ${reply.usage.output} output tokens`,
@@ -419,8 +428,7 @@ try {
   await main();
   console.log("Live Otari smoke test passed");
 } catch (error) {
-  console.error(`not ok - ${running}`);
-  for (const line of notes) console.error(line);
-  console.error(reasonOf(error));
+  if (!(error instanceof StageFailure))
+    console.error(`not ok - ${reasonOf(error)}`);
   process.exitCode = 1;
 }
