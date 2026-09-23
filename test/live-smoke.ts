@@ -15,9 +15,9 @@ import {
   DefaultResourceLoader,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { ConfigError, loadOtariConfig } from "../src/config.ts";
 import { THINKING_LEVEL_MAP } from "../src/model-mapper.ts";
 
-const DEFAULT_BASE_URL = "https://api.otari.ai/api/v1";
 const DEFAULT_MAX_TOKENS = 8;
 const REQUEST_TIMEOUT_MS = 30_000;
 const RUN_TIMEOUT_MS = 300_000;
@@ -56,6 +56,22 @@ function parseReasoning(
   return level as LiveThinkingLevel;
 }
 
+/**
+ * The token and URL go through the extension's own parser, so a URL the
+ * extension would reject fails here with its reason, named for the live
+ * variable.
+ */
+function parseGateway(token: string | undefined, baseUrl: string | undefined) {
+  try {
+    return loadOtariConfig({ OTARI_API_KEY: token, OTARI_BASE_URL: baseUrl });
+  } catch (error) {
+    if (!(error instanceof ConfigError)) throw error;
+    throw new Error(
+      error.message.replaceAll("OTARI_BASE_URL", "OTARI_LIVE_TEST_BASE_URL"),
+    );
+  }
+}
+
 /** One line per passed stage; the first failure ends the run. */
 async function stage<T>(name: string, run: () => Promise<T>): Promise<T> {
   try {
@@ -83,13 +99,13 @@ function modelPart(selector: string): string {
 const { token, model, baseUrl, maxTokens, reasoning } = await stage(
   "configuration",
   async () => {
-    const token = process.env.OTARI_LIVE_TEST_TOKEN;
-    const model = process.env.OTARI_LIVE_TEST_MODEL;
-    const baseUrl = (process.env.OTARI_LIVE_TEST_BASE_URL ?? DEFAULT_BASE_URL)
-      .trim()
-      .replace(/\/+$/, "");
+    const model = process.env.OTARI_LIVE_TEST_MODEL?.trim();
     const maxTokens = parseMaxTokens(process.env.OTARI_LIVE_TEST_MAX_TOKENS);
     const reasoning = parseReasoning(process.env.OTARI_LIVE_TEST_REASONING);
+    const { token, baseUrl } = parseGateway(
+      process.env.OTARI_LIVE_TEST_TOKEN,
+      process.env.OTARI_LIVE_TEST_BASE_URL,
+    );
     assert.ok(
       token,
       "Set OTARI_LIVE_TEST_TOKEN to an API key for the Otari gateway under test",
@@ -115,15 +131,18 @@ const watchdog = setTimeout(() => {
 
 /**
  * The extension reads its configuration from the environment when Pi loads
- * it, so the live variables take the place of whatever the developer's shell
- * carries. Pi's own state lives in temporary directories for the run.
+ * it, so the live values are the only OTARI_* variables left to read. Pi's
+ * own state lives in temporary directories for the run.
  */
 const { session, cleanup } = await stage(
   "extension loads in a Pi session",
   async () => {
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("OTARI_") && !key.startsWith("OTARI_LIVE_TEST_"))
+        delete process.env[key];
+    }
     process.env.OTARI_API_KEY = token;
     process.env.OTARI_BASE_URL = baseUrl;
-    delete process.env.OTARI_MODELS;
     const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-live-"));
     const cwd = await mkdtemp(join(tmpdir(), "pi-otari-live-cwd-"));
     // One request per prompt: a gateway error is the finding, so Pi's turn
@@ -157,12 +176,13 @@ const { session, cleanup } = await stage(
       sessionManager: SessionManager.inMemory(cwd),
       noTools: "all",
     });
-    // A registered provider with a usable key resolves auth. An extension
-    // that rejected its configuration registers nothing.
+    // A registered provider with a usable key resolves auth. The extension
+    // explains a refusal to register through Pi's UI, which this session
+    // does not have.
     const auth = await session.modelRuntime.getAuth("otari");
     assert.ok(
       auth,
-      `The extension did not register the otari provider for ${baseUrl}. Hosted Otari serves its API at ${DEFAULT_BASE_URL}; a self-hosted URL must include the gateway's API prefix, such as /api/v1`,
+      "Pi loaded the extension, but it registered no otari provider. Run `pi -e ./src/index.ts` with the same OTARI_API_KEY and OTARI_BASE_URL to see the reason it reports at startup",
     );
     return { session, cleanup };
   },

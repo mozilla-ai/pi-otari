@@ -65,8 +65,8 @@ OTARI_MODELS=<model id> pi --no-extensions -e ./src/index.ts --no-session -p \
 
 The stages, in order:
 
-1. **configuration**: the variables below are read and validated.
-2. **extension loads in a Pi session**: Pi loads `src/index.ts` by path, the way `pi -e` does, into a session whose state lives in temporary directories. Fails when the extension rejects its configuration and registers no provider.
+1. **configuration**: the variables below are read, with the token and URL going through the extension's own configuration parser, so a URL the extension would reject fails here with its reason.
+2. **extension loads in a Pi session**: Pi loads `src/index.ts` by path, the way `pi -e` does, into a session whose state lives in temporary directories. Fails when the extension registers no provider.
 3. **model discovery through the extension**: Pi refreshes the Otari catalog over the network. Fails with the extension's own diagnostic, or when the configured model is missing from the list, naming the current selector when the same model is listed under another prefix. Also reports which capability fields Otari returned for the model and what Pi registered.
 4. **non-streaming completion**: one plain request outside Pi. Otari's reason for a rejection travels in a `detail` field that Pi's client does not display, so this stage shows it.
 5. **streaming completion through Pi**: one prompt through Pi's agent loop, the extension's stream wrapper, and pi-ai's streaming client, with the model's output capped at the configured bound. Fails on an error reply, a truncated reply, or more than one request for the prompt.
@@ -98,7 +98,7 @@ OTARI_LIVE_TEST_MAX_TOKENS=512 \
 npm run test:live
 ```
 
-The script places the live token and URL in its own environment before Pi loads the extension and ignores `OTARI_MODELS`, so the `OTARI_*` variables in your shell do not affect the run. Nothing under `~/.pi` is read or written.
+The script removes every `OTARI_*` variable from its own environment and sets the live token and URL before Pi loads the extension, so the `OTARI_*` variables in your shell do not affect the run. Nothing under `~/.pi` is read or written.
 
 ## Change dependencies
 
