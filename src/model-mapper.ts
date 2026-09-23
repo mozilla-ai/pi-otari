@@ -5,6 +5,16 @@ import type { ModelCost, OtariModel } from "./types.js";
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
 export const DEFAULT_MAX_TOKENS = 16_384;
 
+/** Pi's thinking levels pass through to Otari by name, xhigh and max included. */
+export const THINKING_LEVEL_MAP = {
+  minimal: "minimal",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+  max: "max",
+} as const;
+
 const ZERO_COST: ModelCost = {
   input: 0,
   output: 0,

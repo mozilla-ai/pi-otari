@@ -15,6 +15,7 @@ import {
   DefaultResourceLoader,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { THINKING_LEVEL_MAP } from "../src/model-mapper.ts";
 
 const DEFAULT_BASE_URL = "https://api.otari.ai/api/v1";
 const DEFAULT_MAX_TOKENS = 8;
@@ -23,15 +24,8 @@ const RUN_TIMEOUT_MS = 300_000;
 const PROMPT = "Reply with exactly: ok";
 /** Loaded by path through Pi's own extension loader, as `pi -e` does. */
 const EXTENSION_PATH = resolve(import.meta.dirname, "../src/index.ts");
-const THINKING_LEVELS = [
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
-type LiveThinkingLevel = (typeof THINKING_LEVELS)[number];
+const THINKING_LEVELS = Object.keys(THINKING_LEVEL_MAP);
+type LiveThinkingLevel = keyof typeof THINKING_LEVEL_MAP;
 const CAPABILITY_FIELDS = [
   "reasoning",
   "input_modalities",
@@ -56,7 +50,7 @@ function parseReasoning(
   if (value === undefined || value.trim() === "") return undefined;
   const level = value.trim();
   assert.ok(
-    (THINKING_LEVELS as readonly string[]).includes(level),
+    THINKING_LEVELS.includes(level),
     `Set OTARI_LIVE_TEST_REASONING to one of ${THINKING_LEVELS.join(", ")}, or leave it unset to prompt without reasoning`,
   );
   return level as LiveThinkingLevel;
@@ -308,22 +302,25 @@ await stage("non-streaming completion", async () => {
  * stream wrapper, and pi-ai's streaming client, against the discovered model
  * with its output capped at the configured bound. Otari publishes no
  * reasoning flag yet (#6), so the extension registers every model without
- * reasoning and Pi would clamp any level to off. The opt-in marks the copy
- * reasoning-capable so the requested level reaches the gateway through the
- * same transport.
+ * reasoning and Pi would clamp any level to off. The opt-in registers the
+ * copy as the extension registers a reasoning model, so the requested level
+ * reaches the gateway through the same transport.
  */
 await stage("streaming completion through Pi", async () => {
   const selected = {
     ...discovered,
     maxTokens,
-    ...(reasoning ? { reasoning: true } : {}),
+    ...(reasoning
+      ? { reasoning: true, thinkingLevelMap: THINKING_LEVEL_MAP }
+      : {}),
   };
   await session.setModel(selected);
   if (reasoning) {
     session.setThinkingLevel(reasoning);
-    assert.ok(
-      session.state.thinkingLevel === reasoning,
-      `Pi offers ${session.getAvailableThinkingLevels().join(", ")} for ${model}, not "${reasoning}". Set OTARI_LIVE_TEST_REASONING to one of those`,
+    assert.equal(
+      session.state.thinkingLevel,
+      reasoning,
+      `Pi offers ${session.getAvailableThinkingLevels().join(", ")} for ${model}`,
     );
   }
   const before = session.state.messages.length;

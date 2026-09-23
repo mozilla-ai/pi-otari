@@ -6,7 +6,11 @@ import {
 import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DiscoveryUnavailableError, discoverModels } from "./discovery.js";
-import { selectorsToModels, toProviderModel } from "./model-mapper.js";
+import {
+  selectorsToModels,
+  THINKING_LEVEL_MAP,
+  toProviderModel,
+} from "./model-mapper.js";
 import {
   type Catalog,
   describeStale,
@@ -15,15 +19,6 @@ import {
 } from "./staleness.js";
 import { createStreamOtari } from "./stream-otari.js";
 import type { Diagnostic, OtariConfig, OtariModel } from "./types.js";
-
-const THINKING_LEVEL_MAP = {
-  minimal: "minimal",
-  low: "low",
-  medium: "medium",
-  high: "high",
-  xhigh: "xhigh",
-  max: "max",
-} as const;
 
 function toRuntimeModel(
   model: OtariModel,
