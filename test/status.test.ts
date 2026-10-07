@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Catalog } from "../src/staleness.js";
 import { registerLifecycleUI } from "../src/status.js";
 import type { OtariConfig, RuntimeState } from "../src/types.js";
-import type { WebSearchState } from "../src/web-search.js";
+import { WebSearchState } from "../src/web-search.js";
 
 const config: OtariConfig = {
   baseUrl: "https://api.otari.ai/api/v1",
@@ -71,10 +71,8 @@ describe("lifecycle UI", () => {
   });
 
   it("names web search in the status only while the deployment offers it", async () => {
-    const webSearch: WebSearchState = {
-      availability: "available",
-      rejected: false,
-    };
+    const webSearch = new WebSearchState();
+    webSearch.probed("available");
     const { handlers } = harness(
       { models: [], diagnostics: [], discoverySource: "none" },
       new Set(),
@@ -91,14 +89,13 @@ describe("lifecycle UI", () => {
       "pi-otari",
       "Otari → anthropic:claude · web search",
     );
-    webSearch.rejected = true;
+    webSearch.refuse("no backend");
     await select();
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "pi-otari",
       "Otari → anthropic:claude",
     );
-    webSearch.rejected = false;
-    webSearch.availability = "unknown";
+    webSearch.probed("unknown");
     await select();
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "pi-otari",
@@ -107,28 +104,25 @@ describe("lifecycle UI", () => {
   });
 
   it("redraws the status when web search state changes between events", async () => {
-    const webSearch: WebSearchState = {
-      availability: "unknown",
-      rejected: false,
-    };
+    let refresh = () => {};
+    const webSearch = new WebSearchState(() => refresh());
     const { handlers, ui } = harness(
       { models: [], diagnostics: [], discoverySource: "none" },
       new Set(),
       webSearch,
     );
+    refresh = () => ui.refreshStatus();
     const ctx = context();
     await handlers.get("model_select")?.(
       { model: { provider: "otari", id: "anthropic:claude" } },
       ctx,
     );
-    webSearch.availability = "available";
-    ui.refreshStatus();
+    webSearch.probed("available");
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "pi-otari",
       "Otari → anthropic:claude · web search",
     );
-    webSearch.rejected = true;
-    ui.refreshStatus();
+    webSearch.refuse("no backend");
     expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
       "pi-otari",
       "Otari → anthropic:claude",

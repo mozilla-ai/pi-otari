@@ -31,10 +31,7 @@ function updateStatus(
   id: string | undefined,
   webSearch?: WebSearchState,
 ): void {
-  // Claim search only on the catalog's word: "unknown" may still work on the
-  // wire (a hybrid gateway answers no probe), but the status line does not guess.
-  const searching =
-    webSearch?.availability === "available" && !webSearch.rejected;
+  const searching = webSearch?.offered ?? false;
   ctx.ui.setStatus(
     "pi-otari",
     provider === "otari" && id

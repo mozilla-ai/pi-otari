@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadOtariConfig } from "../src/config.js";
 import { registerOtariProvider } from "../src/provider.js";
 import type { OtariConfig } from "../src/types.js";
-import { createWebSearchState } from "../src/web-search.js";
+import { WebSearchState } from "../src/web-search.js";
 
 const config: OtariConfig = {
   baseUrl: "https://api.otari.ai/api/v1",
@@ -487,8 +487,8 @@ describe("registerOtariProvider", () => {
   });
 
   it("marks web search available when the tools catalog lists it, clearing a refusal", async () => {
-    const webSearch = createWebSearchState();
-    webSearch.rejected = true;
+    const webSearch = new WebSearchState();
+    webSearch.refuse("earlier refusal");
     const fetcher = vi.fn(
       async (url: string | URL | Request, init?: RequestInit) => {
         if (String(url) === `${config.baseUrl}/tools`) {
@@ -516,10 +516,7 @@ describe("registerOtariProvider", () => {
     await registeredProvider(pi).refreshModels?.(
       refreshContext({ credential: { type: "api_key", key: "tk_stored" } }),
     );
-    expect(webSearch).toMatchObject({
-      availability: "available",
-      rejected: false,
-    });
+    expect(webSearch.offered).toBe(true);
   });
 
   it("clears a refusal on the next refresh even when the probe cannot tell", async () => {
@@ -530,20 +527,15 @@ describe("registerOtariProvider", () => {
             status: 200,
           }),
     );
-    const onChange = vi.fn();
-    const webSearch = createWebSearchState(onChange);
-    webSearch.rejected = true;
+    const webSearch = new WebSearchState();
+    webSearch.refuse("earlier refusal");
     const pi = fakePi();
     registerOtariProvider(pi, config, [], {
       fetch: fetcher as typeof fetch,
       webSearch,
     });
     await registeredProvider(pi).refreshModels?.(refreshContext());
-    expect(webSearch).toMatchObject({
-      availability: "unknown",
-      rejected: false,
-    });
-    expect(onChange).toHaveBeenCalled();
+    expect([webSearch.active, webSearch.offered]).toEqual([true, false]);
   });
 
   it("probes /tools alongside discovery, not after it", async () => {
@@ -572,7 +564,7 @@ describe("registerOtariProvider", () => {
           status: 200,
         }),
     );
-    const webSearch = createWebSearchState();
+    const webSearch = new WebSearchState();
     const pi = fakePi();
     registerOtariProvider(pi, { ...config, webSearch: false }, [], {
       fetch: fetcher as typeof fetch,
@@ -583,13 +575,13 @@ describe("registerOtariProvider", () => {
     expect(String(vi.mocked(fetcher).mock.calls[0][0])).toBe(
       `${config.baseUrl}/models`,
     );
-    expect(webSearch.availability).toBe("unknown");
+    expect(webSearch.offered).toBe(false);
   });
 
   it("leaves web search state untouched when discovery fails", async () => {
     const fetcher = vi.fn(async () => new Response("{}", { status: 500 }));
-    const webSearch = createWebSearchState();
-    webSearch.availability = "available";
+    const webSearch = new WebSearchState();
+    webSearch.probed("available");
     const pi = fakePi();
     registerOtariProvider(pi, config, [], {
       fetch: fetcher as typeof fetch,
@@ -598,7 +590,7 @@ describe("registerOtariProvider", () => {
     await expect(
       registeredProvider(pi).refreshModels?.(refreshContext()),
     ).rejects.toThrow();
-    expect(webSearch.availability).toBe("available");
+    expect(webSearch.offered).toBe(true);
   });
 
   it("does not judge OTARI_MODELS selectors when discovery returns no models", async () => {

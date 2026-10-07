@@ -20,9 +20,9 @@ import {
 import { createStreamOtari } from "./stream-otari.js";
 import type { Diagnostic, OtariConfig, OtariModel } from "./types.js";
 import {
-  createWebSearchState,
   probeWebSearch,
-  type WebSearchState,
+  WebSearchState,
+  wrapFetchWithWebSearch,
 } from "./web-search.js";
 
 function toRuntimeModel(
@@ -102,7 +102,7 @@ export function registerOtariProvider(
     ).values(),
   ];
   const catalog = dependencies.catalog ?? new Set<string>();
-  const webSearch = dependencies.webSearch ?? createWebSearchState();
+  const webSearch = dependencies.webSearch ?? new WebSearchState();
   const reported = new Set<string>();
   // OTARI_MODELS entries stay registered as given, since they may name models
   // discovery does not list. Once Otari has answered, tell the user about the
@@ -150,13 +150,7 @@ export function registerOtariProvider(
         catalog.clear();
         for (const model of result.models) catalog.add(model.id);
         reportStaleSelectors();
-        if (probe) {
-          webSearch.availability = await probe;
-          // A refusal holds until the next model refresh, as its warning says:
-          // each completed probe gives the deployment a fresh chance.
-          webSearch.rejected = false;
-          webSearch.onChange?.();
-        }
+        if (probe) webSearch.probed(await probe);
         return result.models.map((model) =>
           toRuntimeModel(model, config.baseUrl),
         );
@@ -171,11 +165,17 @@ export function registerOtariProvider(
       streamSimple: createStreamOtari(
         catalog,
         config.webSearch
-          ? {
-              baseUrl: config.baseUrl,
-              state: webSearch,
-              onDiagnostic: dependencies.onDiagnostic,
-            }
+          ? (inner) =>
+              wrapFetchWithWebSearch(inner, {
+                baseUrl: config.baseUrl,
+                state: webSearch,
+                onRefused: (reason) =>
+                  dependencies.onDiagnostic?.({
+                    level: "warning",
+                    code: "web-search-refused",
+                    message: `Otari refused its web search tool: ${reason.replace(/\.?$/, ".")} The request was retried without web search, which stays off until the next model refresh. Set OTARI_WEB_SEARCH=off to stop declaring it.`,
+                  }),
+              })
           : undefined,
       ),
     },
