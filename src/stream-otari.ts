@@ -13,6 +13,8 @@ import {
   isStale,
   replacementsFor,
 } from "./staleness.js";
+import type { Diagnostic } from "./types.js";
+import { type WebSearchState, wrapFetchWithWebSearch } from "./web-search.js";
 
 function errorMessage(
   model: Model<"openai-completions">,
@@ -72,7 +74,33 @@ export function explainGatewayError(
   ].join("\n\n");
 }
 
-export function createStreamOtari(catalog: Catalog) {
+export interface WebSearchWiring {
+  /** Only completions sent to this deployment declare the tool. */
+  baseUrl: string;
+  state: WebSearchState;
+  onDiagnostic?: (diagnostic: Diagnostic) => void;
+}
+
+export function createStreamOtari(
+  catalog: Catalog,
+  webSearch?: WebSearchWiring,
+) {
+  // Every request's wrapper shares webSearch.state, which is what keeps
+  // concurrent refusals down to a single warning.
+  const wrapFetch = (inner: typeof fetch) =>
+    webSearch
+      ? wrapFetchWithWebSearch(
+          inner,
+          webSearch.baseUrl,
+          webSearch.state,
+          (detail) =>
+            webSearch.onDiagnostic?.({
+              level: "warning",
+              code: "web-search-refused",
+              message: `Otari refused its web search tool: ${detail} The request was retried without web search, which stays off until the next model refresh. Set OTARI_WEB_SEARCH=off to stop declaring it.`,
+            }),
+        )
+      : inner;
   return function streamOtari(
     model: Model<Api>,
     context: TranscriptContext,
@@ -80,13 +108,19 @@ export function createStreamOtari(catalog: Catalog) {
   ) {
     const stream = createAssistantMessageEventStream();
     const openAIModel = model as Model<"openai-completions">;
+    // Declare the gateway-run web search tool on every request while the
+    // gateway welcomes it; the wrapper owns refusal detection and the one
+    // transparent retry without the declaration.
+    const streamOptions: SimpleStreamOptions | undefined = webSearch
+      ? { ...options, fetch: wrapFetch(options?.fetch ?? fetch) }
+      : options;
 
     (async () => {
       try {
         const attempt = openAICompletionsApi().streamSimple(
           openAIModel,
           context,
-          options,
+          streamOptions,
         );
         for await (const event of attempt) {
           if (event.type !== "error") {
