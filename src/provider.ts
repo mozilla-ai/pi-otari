@@ -19,6 +19,11 @@ import {
 } from "./staleness.js";
 import { createStreamOtari } from "./stream-otari.js";
 import type { Diagnostic, OtariConfig, OtariModel } from "./types.js";
+import {
+  createWebSearchState,
+  probeWebSearch,
+  type WebSearchState,
+} from "./web-search.js";
 
 function toRuntimeModel(
   model: OtariModel,
@@ -78,6 +83,8 @@ export interface ProviderDependencies {
   onDiagnostic?: (diagnostic: Diagnostic) => void;
   /** Kept in step with each discovery; see staleness.ts. */
   catalog?: Catalog;
+  /** Shared with the request path; each successful discovery refreshes it. */
+  webSearch?: WebSearchState;
 }
 
 export function registerOtariProvider(
@@ -95,6 +102,7 @@ export function registerOtariProvider(
     ).values(),
   ];
   const catalog = dependencies.catalog ?? new Set<string>();
+  const webSearch = dependencies.webSearch ?? createWebSearchState();
   const reported = new Set<string>();
   // OTARI_MODELS entries stay registered as given, since they may name models
   // discovery does not list. Once Otari has answered, tell the user about the
@@ -124,20 +132,31 @@ export function registerOtariProvider(
         context.credential?.type === "api_key"
           ? context.credential.key
           : undefined;
+      const token = storedToken ?? config.token;
+      const fetcher = dependencies.fetch ?? fetch;
+      // Probe alongside discovery so a slow /tools never adds its own timeout
+      // to the refresh. probeWebSearch never rejects; its answer is only
+      // applied once discovery has succeeded.
+      const probe = config.webSearch
+        ? probeWebSearch(config, token, fetcher)
+        : undefined;
       try {
         const result = await discoverModels(
-          {
-            ...config,
-            token: storedToken ?? config.token,
-            environmentModels: [],
-          },
-          dependencies.fetch ?? fetch,
+          { ...config, token, environmentModels: [] },
+          fetcher,
         );
         for (const diagnostic of result.diagnostics)
           dependencies.onDiagnostic?.(diagnostic);
         catalog.clear();
         for (const model of result.models) catalog.add(model.id);
         reportStaleSelectors();
+        if (probe) {
+          webSearch.availability = await probe;
+          // A refusal holds until the next model refresh, as its warning says:
+          // each completed probe gives the deployment a fresh chance.
+          webSearch.rejected = false;
+          webSearch.onChange?.();
+        }
         return result.models.map((model) =>
           toRuntimeModel(model, config.baseUrl),
         );
@@ -149,7 +168,16 @@ export function registerOtariProvider(
     },
     api: {
       ...streams,
-      streamSimple: createStreamOtari(catalog),
+      streamSimple: createStreamOtari(
+        catalog,
+        config.webSearch
+          ? {
+              baseUrl: config.baseUrl,
+              state: webSearch,
+              onDiagnostic: dependencies.onDiagnostic,
+            }
+          : undefined,
+      ),
     },
   });
   pi.registerProvider({

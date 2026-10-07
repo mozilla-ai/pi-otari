@@ -315,6 +315,173 @@ describe("Pi–Otari integration", () => {
     }
   });
 
+  it("declares Otari's web search tool on completions when the gateway offers it", async () => {
+    let completionPayload: Record<string, unknown> | undefined;
+    const server = createServer(async (request, response) => {
+      expect(request.headers.authorization).toBe("Bearer tk_integration");
+      if (request.method === "GET" && request.url === "/api/v1/models") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "test-model" }] }));
+        return;
+      }
+      if (request.method === "GET" && request.url === "/api/v1/tools") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            data: [{ id: "otari_web_search", available: true }],
+          }),
+        );
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        request.url === "/api/v1/chat/completions"
+      ) {
+        completionPayload = await body(request);
+        sse(response, [
+          toolChunk({ role: "assistant", content: "done" }),
+          toolChunk({}, "stop"),
+        ]);
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Expected TCP server");
+
+    vi.stubEnv("OTARI_API_KEY", "tk_integration");
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/api/v1`);
+    const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-search-"));
+    const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      extensionFactories: [createOtariExtension()],
+    });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({
+      cwd,
+      agentDir,
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+    try {
+      await session.modelRuntime.refresh({ allowNetwork: true });
+      const model = session.modelRuntime.getModel("otari", "test-model");
+      expect(model).toBeDefined();
+      if (!model) throw new Error("Expected Otari model");
+      await session.setModel(model);
+      await session.prompt("Reply with done.");
+
+      // Pi's own function tools stay declared; the gateway's tool is appended.
+      expect(completionPayload?.tools).toEqual(
+        expect.arrayContaining([{ type: "otari_web_search" }]),
+      );
+      const tools = completionPayload?.tools as Array<{ type: string }>;
+      expect(tools.some((tool) => tool.type === "function")).toBe(true);
+      expect(session.state.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        stopReason: "stop",
+      });
+    } finally {
+      session.dispose();
+      server.close();
+      await once(server, "close");
+    }
+  });
+
+  it("retries without the declaration when the gateway refuses web search", async () => {
+    const completionTools: unknown[] = [];
+    const server = createServer(async (request, response) => {
+      if (request.method === "GET" && request.url === "/api/v1/models") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "test-model" }] }));
+        return;
+      }
+      if (request.method === "GET" && request.url === "/api/v1/tools") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            data: [{ id: "otari_web_search", available: true }],
+          }),
+        );
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        request.url === "/api/v1/chat/completions"
+      ) {
+        completionTools.push((await body(request)).tools);
+        if (completionTools.length === 1) {
+          response.writeHead(400, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              detail: "web search is not enabled for this workspace",
+            }),
+          );
+          return;
+        }
+        sse(response, [
+          toolChunk({ role: "assistant", content: "done" }),
+          toolChunk({}, "stop"),
+        ]);
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Expected TCP server");
+
+    vi.stubEnv("OTARI_API_KEY", "tk_integration");
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/api/v1`);
+    const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-search-"));
+    const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      extensionFactories: [createOtariExtension()],
+    });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({
+      cwd,
+      agentDir,
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+    try {
+      await session.modelRuntime.refresh({ allowNetwork: true });
+      const model = session.modelRuntime.getModel("otari", "test-model");
+      expect(model).toBeDefined();
+      if (!model) throw new Error("Expected Otari model");
+      await session.setModel(model);
+      await session.prompt("Reply with done.");
+
+      // The refusal never reaches the model: the same prompt is retried once
+      // without the declaration and completes.
+      expect(completionTools.length).toBe(2);
+      expect(completionTools[0]).toEqual(
+        expect.arrayContaining([{ type: "otari_web_search" }]),
+      );
+      expect(JSON.stringify(completionTools[1])).not.toContain(
+        "otari_web_search",
+      );
+      expect(session.state.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        stopReason: "stop",
+      });
+    } finally {
+      session.dispose();
+      server.close();
+      await once(server, "close");
+    }
+  });
+
   it("stores an API key through login without adding it to model context", async () => {
     let discoveryCount = 0;
     let completionCount = 0;

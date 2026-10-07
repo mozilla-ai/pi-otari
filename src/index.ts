@@ -7,6 +7,7 @@ import { ConfigError, loadOtariConfig } from "./config.js";
 import type { Catalog } from "./staleness.js";
 import { registerLifecycleUI } from "./status.js";
 import type { OtariConfig, RuntimeState } from "./types.js";
+import { createWebSearchState } from "./web-search.js";
 
 const MINIMUM_PI_VERSION = [0, 81, 0] as const;
 
@@ -38,7 +39,10 @@ export function createOtariExtension(
       discoverySource: "none",
     };
     const catalog: Catalog = new Set();
-    const ui = registerLifecycleUI(pi, () => state, catalog);
+    // Created before any config check so the status line and the provider share
+    // one answer to "does this deployment run web search for us".
+    const webSearch = createWebSearchState(() => ui.refreshStatus());
+    const ui = registerLifecycleUI(pi, () => state, catalog, webSearch);
 
     if (!supportsNativeProviderAuth(dependencies.piVersion ?? VERSION)) {
       state = {
@@ -82,6 +86,7 @@ export function createOtariExtension(
       fetch: dependencies.fetch ?? fetch,
       onDiagnostic: (diagnostic) => ui.reportDiagnostic(diagnostic),
       catalog,
+      webSearch,
     });
     state = { ...state, config };
   };

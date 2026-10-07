@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadOtariConfig } from "../src/config.js";
 import { registerOtariProvider } from "../src/provider.js";
 import type { OtariConfig } from "../src/types.js";
+import { createWebSearchState } from "../src/web-search.js";
 
 const config: OtariConfig = {
   baseUrl: "https://api.otari.ai/api/v1",
@@ -11,7 +12,11 @@ const config: OtariConfig = {
   discoveryTimeoutMs: 5000,
   environmentModels: [],
   officialHosted: true,
+  webSearch: true,
 };
+
+/** A tools catalog with nothing to offer: discovery probes it after /models. */
+const noTools = new Response(JSON.stringify({ data: [] }), { status: 200 });
 
 function fakePi(): ExtensionAPI {
   return { registerProvider: vi.fn() } as unknown as ExtensionAPI;
@@ -151,10 +156,11 @@ describe("registerOtariProvider", () => {
 
   it("uses a stored API key for dynamic discovery before the environment key", async () => {
     const fetcher = vi.fn(
-      async (_url: string | URL | Request, init?: RequestInit) => {
+      async (url: string | URL | Request, init?: RequestInit) => {
         expect(new Headers(init?.headers).get("authorization")).toBe(
           "Bearer tk_stored",
         );
+        if (String(url).endsWith("/tools")) return noTools.clone();
         return new Response(
           JSON.stringify({ data: [{ id: "mzai:stored-model" }] }),
           { status: 200 },
@@ -177,7 +183,8 @@ describe("registerOtariProvider", () => {
       }),
     );
 
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    // /models, then the web-search capability probe against /tools.
+    expect(fetcher).toHaveBeenCalledTimes(2);
     expect(storedModels).toEqual([
       expect.objectContaining({ id: "mzai:stored-model" }),
     ]);
@@ -196,7 +203,7 @@ describe("registerOtariProvider", () => {
     const pi = fakePi();
     registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
     await registeredProvider(pi).refreshModels?.(refreshContext());
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("registers Otari before models are discovered so login is available", () => {
@@ -218,6 +225,8 @@ describe("registerOtariProvider", () => {
 
   it("targets hosted /api/v1 for both discovery and inference by default", async () => {
     const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url) === "https://api.otari.ai/api/v1/tools")
+        return noTools.clone();
       expect(String(url)).toBe("https://api.otari.ai/api/v1/models");
       return new Response(
         JSON.stringify({ data: [{ id: "nebius:openai/gpt-oss-120b" }] }),
@@ -237,7 +246,7 @@ describe("registerOtariProvider", () => {
     await provider.refreshModels?.(
       refreshContext({ credential: { type: "api_key", key: "tk_default" } }),
     );
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     const [model] = provider.getModels();
     expect(`${model?.baseUrl}/chat/completions`).toBe(
       "https://api.otari.ai/api/v1/chat/completions",
@@ -302,7 +311,8 @@ describe("registerOtariProvider", () => {
 
   it("reports discovery diagnostics, but not a successful discovery", async () => {
     const statuses = [404, 401, 200];
-    const fetcher = vi.fn(async (_url: string | URL | Request) => {
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/tools")) return noTools.clone();
       const status = statuses.shift() ?? 200;
       return new Response(
         JSON.stringify(
@@ -356,7 +366,8 @@ describe("registerOtariProvider", () => {
         }),
       ),
     ).rejects.toThrow();
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    // /models, plus the web search probe that runs alongside it.
+    expect(fetcher).toHaveBeenCalledTimes(2);
     expect(persisted).toBe("untouched");
     expect(provider.getModels()).toEqual([
       expect.objectContaining({ id: cached.id }),
@@ -403,9 +414,10 @@ describe("registerOtariProvider", () => {
       { data: [{ id: "nebius:openai/gpt-oss-120b" }] },
       { data: [] },
     ];
-    const fetcher = vi.fn(
-      async () => new Response(JSON.stringify(bodies.shift()), { status: 200 }),
-    );
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/tools")) return noTools.clone();
+      return new Response(JSON.stringify(bodies.shift()), { status: 200 });
+    });
     const catalog = new Set(["stale:seed"]);
     const pi = fakePi();
     registerOtariProvider(pi, config, [], {
@@ -472,6 +484,121 @@ describe("registerOtariProvider", () => {
       "mzai:openai/gpt-oss-120b",
       "nebius:openai/gpt-oss-120b",
     ]);
+  });
+
+  it("marks web search available when the tools catalog lists it, clearing a refusal", async () => {
+    const webSearch = createWebSearchState();
+    webSearch.rejected = true;
+    const fetcher = vi.fn(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url) === `${config.baseUrl}/tools`) {
+          expect(new Headers(init?.headers).get("authorization")).toBe(
+            "Bearer tk_stored",
+          );
+          return new Response(
+            JSON.stringify({
+              data: [{ id: "otari_web_search", available: true }],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({ data: [{ id: "mzai:stored-model" }] }),
+          { status: 200 },
+        );
+      },
+    );
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], {
+      fetch: fetcher as typeof fetch,
+      webSearch,
+    });
+    await registeredProvider(pi).refreshModels?.(
+      refreshContext({ credential: { type: "api_key", key: "tk_stored" } }),
+    );
+    expect(webSearch).toMatchObject({
+      availability: "available",
+      rejected: false,
+    });
+  });
+
+  it("clears a refusal on the next refresh even when the probe cannot tell", async () => {
+    const fetcher = vi.fn(async (url: string | URL | Request) =>
+      String(url).endsWith("/tools")
+        ? new Response("{}", { status: 404 })
+        : new Response(JSON.stringify({ data: [{ id: "mzai:model" }] }), {
+            status: 200,
+          }),
+    );
+    const onChange = vi.fn();
+    const webSearch = createWebSearchState(onChange);
+    webSearch.rejected = true;
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], {
+      fetch: fetcher as typeof fetch,
+      webSearch,
+    });
+    await registeredProvider(pi).refreshModels?.(refreshContext());
+    expect(webSearch).toMatchObject({
+      availability: "unknown",
+      rejected: false,
+    });
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it("probes /tools alongside discovery, not after it", async () => {
+    let releaseModels: (() => void) | undefined;
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/tools")) return noTools.clone();
+      await new Promise<void>((resolve) => {
+        releaseModels = resolve;
+      });
+      return new Response(JSON.stringify({ data: [{ id: "mzai:model" }] }), {
+        status: 200,
+      });
+    });
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], { fetch: fetcher as typeof fetch });
+    const refresh = registeredProvider(pi).refreshModels?.(refreshContext());
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    releaseModels?.();
+    await refresh;
+  });
+
+  it("skips the tools probe when web search is configured off", async () => {
+    const fetcher = vi.fn(
+      async (_url: string | URL | Request) =>
+        new Response(JSON.stringify({ data: [{ id: "mzai:model" }] }), {
+          status: 200,
+        }),
+    );
+    const webSearch = createWebSearchState();
+    const pi = fakePi();
+    registerOtariProvider(pi, { ...config, webSearch: false }, [], {
+      fetch: fetcher as typeof fetch,
+      webSearch,
+    });
+    await registeredProvider(pi).refreshModels?.(refreshContext());
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(fetcher).mock.calls[0][0])).toBe(
+      `${config.baseUrl}/models`,
+    );
+    expect(webSearch.availability).toBe("unknown");
+  });
+
+  it("leaves web search state untouched when discovery fails", async () => {
+    const fetcher = vi.fn(async () => new Response("{}", { status: 500 }));
+    const webSearch = createWebSearchState();
+    webSearch.availability = "available";
+    const pi = fakePi();
+    registerOtariProvider(pi, config, [], {
+      fetch: fetcher as typeof fetch,
+      webSearch,
+    });
+    await expect(
+      registeredProvider(pi).refreshModels?.(refreshContext()),
+    ).rejects.toThrow();
+    expect(webSearch.availability).toBe("available");
   });
 
   it("does not judge OTARI_MODELS selectors when discovery returns no models", async () => {

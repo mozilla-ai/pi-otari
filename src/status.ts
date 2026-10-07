@@ -9,6 +9,7 @@ import {
   replacementsFor,
 } from "./staleness.js";
 import type { Diagnostic, RuntimeState } from "./types.js";
+import type { WebSearchState } from "./web-search.js";
 
 export interface LifecycleUI {
   /**
@@ -17,16 +18,28 @@ export interface LifecycleUI {
    * otari" without the underlying message, so the extension has to relay it.
    */
   reportDiagnostic(diagnostic: Diagnostic): void;
+  /**
+   * Redraw the status line for the last selected model, for changes that
+   * arrive between session events (a web search probe or refusal).
+   */
+  refreshStatus(): void;
 }
 
 function updateStatus(
   ctx: ExtensionContext,
   provider: string | undefined,
   id: string | undefined,
+  webSearch?: WebSearchState,
 ): void {
+  // Claim search only on the catalog's word: "unknown" may still work on the
+  // wire (a hybrid gateway answers no probe), but the status line does not guess.
+  const searching =
+    webSearch?.availability === "available" && !webSearch.rejected;
   ctx.ui.setStatus(
     "pi-otari",
-    provider === "otari" && id ? `Otari → ${id}` : undefined,
+    provider === "otari" && id
+      ? `Otari → ${id}${searching ? " · web search" : ""}`
+      : undefined,
   );
 }
 
@@ -44,10 +57,22 @@ export function registerLifecycleUI(
   pi: ExtensionAPI,
   getState: () => RuntimeState,
   catalog: Catalog,
+  webSearch?: WebSearchState,
 ): LifecycleUI {
   let ui: ExtensionContext["ui"] | undefined;
+  let shown:
+    | { ctx: ExtensionContext; provider?: string; id?: string }
+    | undefined;
   const captureUI = (ctx: ExtensionContext) => {
     ui = ctx.hasUI ? ctx.ui : undefined;
+  };
+  const showStatus = (
+    ctx: ExtensionContext,
+    provider: string | undefined,
+    id: string | undefined,
+  ) => {
+    shown = { ctx, provider, id };
+    updateStatus(ctx, provider, id, webSearch);
   };
 
   // Discovery is the authority on what Otari routes. Warn user when the
@@ -67,13 +92,13 @@ export function registerLifecycleUI(
 
   pi.on("model_select", (event, ctx) => {
     captureUI(ctx);
-    updateStatus(ctx, event.model.provider, event.model.id);
+    showStatus(ctx, event.model.provider, event.model.id);
     warnIfStale(ctx, event.model);
   });
 
   pi.on("session_start", async (_event, ctx) => {
     captureUI(ctx);
-    updateStatus(ctx, ctx.model?.provider, ctx.model?.id);
+    showStatus(ctx, ctx.model?.provider, ctx.model?.id);
     if (!ctx.hasUI) return;
 
     const error = getState().diagnostics.find((item) => item.level === "error");
@@ -98,6 +123,9 @@ export function registerLifecycleUI(
   return {
     reportDiagnostic(diagnostic) {
       ui?.notify(diagnostic.message, diagnostic.level);
+    },
+    refreshStatus() {
+      if (shown) updateStatus(shown.ctx, shown.provider, shown.id, webSearch);
     },
   };
 }
