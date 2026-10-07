@@ -15,7 +15,7 @@ export class DiscoveryUnavailableError extends Error {
   }
 }
 
-async function request(
+export async function request(
   url: string,
   token: string | undefined,
   timeoutMs: number,

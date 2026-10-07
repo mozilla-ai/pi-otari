@@ -31,6 +31,8 @@ export interface OtariConfig {
   discoveryTimeoutMs: number;
   environmentModels: string[];
   officialHosted: boolean;
+  /** Whether requests may declare Otari's gateway-run web search tool. */
+  webSearch: boolean;
 }
 
 export interface DiscoveryResult {

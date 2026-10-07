@@ -8,6 +8,7 @@ const base: OtariConfig = {
   discoveryTimeoutMs: 5000,
   environmentModels: [],
   officialHosted: true,
+  webSearch: true,
 };
 
 const response = (status: number, body: unknown): Response =>

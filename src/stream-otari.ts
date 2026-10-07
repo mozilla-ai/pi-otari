@@ -72,7 +72,14 @@ export function explainGatewayError(
   ].join("\n\n");
 }
 
-export function createStreamOtari(catalog: Catalog) {
+/**
+ * `wrapFetch`, when given, decorates the fetch Pi's OpenAI client uses for
+ * each request; the provider uses it to declare Otari's web search tool.
+ */
+export function createStreamOtari(
+  catalog: Catalog,
+  wrapFetch?: (inner: typeof fetch) => typeof fetch,
+) {
   return function streamOtari(
     model: Model<Api>,
     context: TranscriptContext,
@@ -80,13 +87,16 @@ export function createStreamOtari(catalog: Catalog) {
   ) {
     const stream = createAssistantMessageEventStream();
     const openAIModel = model as Model<"openai-completions">;
+    const streamOptions: SimpleStreamOptions | undefined = wrapFetch
+      ? { ...options, fetch: wrapFetch(options?.fetch ?? fetch) }
+      : options;
 
     (async () => {
       try {
         const attempt = openAICompletionsApi().streamSimple(
           openAIModel,
           context,
-          options,
+          streamOptions,
         );
         for await (const event of attempt) {
           if (event.type !== "error") {

@@ -91,6 +91,12 @@ pi
 
 These selectors are registered as given, and Otari must have the corresponding provider and model enabled for the workspace. When discovery succeeds and its list does not include one of them, the extension warns once, naming the selector and, if the same model is listed under another provider prefix, the current selector to use instead. The entry itself stays registered until you update or remove it in `OTARI_MODELS` and restart Pi.
 
+## Web search
+
+When the connected Otari deployment offers its gateway-run web search tool, every Otari request declares it: the model can search the web mid-completion, Otari runs the search server-side, and the exchange stays out of Pi's transcript while its token usage is folded into the request's totals. Searches are billed by Otari per call, under the workspace's web-search policy. No setup is needed beyond an Otari deployment with a search backend configured; set `OTARI_WEB_SEARCH=off` to stop declaring the tool. Only chat completions sent to `OTARI_BASE_URL` for `otari/*` models carry the declaration; models from other Pi providers are never affected.
+
+The extension learns availability from the gateway's tools catalog (`GET {OTARI_BASE_URL}/tools`) whenever the model list refreshes, and Pi's status line shows `Otari → <model-id> · web search` while it is offered. A deployment whose catalog route is unreachable, such as a hybrid gateway, is probed optimistically instead: requests keep declaring the tool until the gateway refuses one. When the first request after a refresh that declares the tool is rejected with a 400, 403, or 422, it is retried once without the declaration. If that retry succeeds, the declaration was the problem (no search backend configured, web search disabled for the workspace, or a gateway too old to know the tool): web search stays off until the next model refresh, and a warning names the gateway's reason. If the retry fails too, its error is shown as usual and web search stays on. Once the gateway has accepted the declaration, later errors are not retried.
+
 ## Reasoning levels
 
 Models that Otari discovery marks as reasoning-capable expose Pi's `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning levels. Models without that capability use Pi's conservative non-reasoning default. The extension forwards the selected level unchanged. Pi's default remains `medium` unless the user configures or selects another level.
@@ -128,6 +134,7 @@ HTTP is accepted only for loopback development endpoints.
 | `OTARI_BASE_URL` | `https://api.otari.ai/api/v1` | OpenAI-compatible base URL, including the gateway's API prefix |
 | `OTARI_DISCOVERY_TIMEOUT_MS` | `5000` | Discovery timeout from 1000 to 30000 ms |
 | `OTARI_MODELS` | none | Conditional fallback or additional model selectors |
+| `OTARI_WEB_SEARCH` | `on` | Declare Otari's gateway-run web search tool on Otari requests; `off` disables it |
 
 ## Privacy and security
 
@@ -141,6 +148,7 @@ Model requests using `otari/*` pass through Otari and the selected upstream prov
 - **Missing credentials:** run `/login otari`, or set `OTARI_API_KEY` before starting or restarting Pi.
 - **401/403:** Otari rejected the key used for discovery. Run `/login otari` with a valid replacement key, or set `OTARI_API_KEY` and restart Pi; then confirm workspace access. One possible cause is a stale key saved with `/login otari`, which takes precedence over `OTARI_API_KEY`; run `/logout otari` to fall back to the environment variable. The cached model list stays in place until the key is fixed.
 - **Unknown model:** the selected provider or model is not enabled in your Otari workspace. Enable it in Otari, refresh the provider, or select a different Otari model in Pi.
+- **“Otari refused its web search tool: …”:** the gateway rejected the `otari_web_search` declaration, so the request was retried without it and web search is paused until the next model refresh. The quoted reason is the gateway's own: configure a search backend (a `web_search_provider` key or `web_search_url`) or enable web search for the workspace in Otari. Set `OTARI_WEB_SEARCH=off` to stop declaring the tool.
 - **“Otari (at …) does not list …”:** that selector is not in the model list Otari returned for the configured URL. Its provider or model was disabled, or the model moved to another provider prefix, as with hosted Otari's retired `mzai:` prefix. Select a current model in `/model`; if the selector comes from `OTARI_MODELS`, update or remove it there.
 - **“400 status code (no body)” on a prompt:** Otari rejected the request; its reason travels in a `detail` field that Pi's OpenAI client does not display (a direct `curl` to `/chat/completions` shows it). When the selected model is missing from the discovered list, the extension's explanation precedes this line. Otherwise, check in Otari that the model's provider is enabled and has a credential, or select a model from another provider in `/model`.
 - **“hosted model discovery is unavailable”:** The hosted `/models` endpoint returned `404` or `405`. No public catalog fallback is supported. Retry discovery when the service is available; if the error persists, contact the Otari service operator.
