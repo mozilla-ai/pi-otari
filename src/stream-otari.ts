@@ -13,8 +13,6 @@ import {
   isStale,
   replacementsFor,
 } from "./staleness.js";
-import type { Diagnostic } from "./types.js";
-import { type WebSearchState, wrapFetchWithWebSearch } from "./web-search.js";
 
 function errorMessage(
   model: Model<"openai-completions">,
@@ -74,33 +72,14 @@ export function explainGatewayError(
   ].join("\n\n");
 }
 
-export interface WebSearchWiring {
-  /** Only completions sent to this deployment declare the tool. */
-  baseUrl: string;
-  state: WebSearchState;
-  onDiagnostic?: (diagnostic: Diagnostic) => void;
-}
-
+/**
+ * `wrapFetch`, when given, decorates the fetch Pi's OpenAI client uses for
+ * each request; the provider uses it to declare Otari's web search tool.
+ */
 export function createStreamOtari(
   catalog: Catalog,
-  webSearch?: WebSearchWiring,
+  wrapFetch?: (inner: typeof fetch) => typeof fetch,
 ) {
-  // Every request's wrapper shares webSearch.state, which is what keeps
-  // concurrent refusals down to a single warning.
-  const wrapFetch = (inner: typeof fetch) =>
-    webSearch
-      ? wrapFetchWithWebSearch(
-          inner,
-          webSearch.baseUrl,
-          webSearch.state,
-          (detail) =>
-            webSearch.onDiagnostic?.({
-              level: "warning",
-              code: "web-search-refused",
-              message: `Otari refused its web search tool: ${detail} The request was retried without web search, which stays off until the next model refresh. Set OTARI_WEB_SEARCH=off to stop declaring it.`,
-            }),
-        )
-      : inner;
   return function streamOtari(
     model: Model<Api>,
     context: TranscriptContext,
@@ -108,10 +87,7 @@ export function createStreamOtari(
   ) {
     const stream = createAssistantMessageEventStream();
     const openAIModel = model as Model<"openai-completions">;
-    // Declare the gateway-run web search tool on every request while the
-    // gateway welcomes it; the wrapper owns refusal detection and the one
-    // transparent retry without the declaration.
-    const streamOptions: SimpleStreamOptions | undefined = webSearch
+    const streamOptions: SimpleStreamOptions | undefined = wrapFetch
       ? { ...options, fetch: wrapFetch(options?.fetch ?? fetch) }
       : options;
 

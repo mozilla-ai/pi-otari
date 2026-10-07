@@ -123,7 +123,9 @@ describe("Pi–Otari integration", () => {
           completionPayload?.messages as Array<{ role: string }> | undefined
         )?.[0]?.role,
       ).toBe("system");
-      expect(completionCount).toBe(1);
+      // Pi does not retry the turn. The second request is the extension's
+      // one check per refresh that the error is not about web search.
+      expect(completionCount).toBe(2);
       expect(session.state.messages.at(-1)).toMatchObject({
         role: "assistant",
         stopReason: "error",
@@ -199,9 +201,11 @@ describe("Pi–Otari integration", () => {
       await session.setModel(model);
       await session.prompt("Reply with done.");
 
-      // One request: Pi retries a turn whose error text looks transient, so
-      // the explanation must not read as one (it carries no URL or port).
-      expect(completionCount).toBe(1);
+      // Pi retries a turn whose error text looks transient, so the
+      // explanation must not read as one (it carries no URL or port). The
+      // second request is the extension's one check per refresh that the
+      // error is not about web search.
+      expect(completionCount).toBe(2);
       const last = session.state.messages.at(-1) as {
         stopReason?: string;
         errorMessage?: string;

@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import type { OtariConfig } from "../src/types.js";
 import {
-  createWebSearchState,
   probeWebSearch,
-  webSearchActive,
-  webSearchRefusalDetail,
+  rejectionReason,
+  WebSearchState,
   wrapFetchWithWebSearch,
 } from "../src/web-search.js";
 
+const BASE_URL = "https://api.otari.ai/api/v1";
+const COMPLETIONS_URL = `${BASE_URL}/chat/completions`;
+
 const config: OtariConfig = {
-  baseUrl: "https://api.otari.ai/api/v1",
+  baseUrl: BASE_URL,
   token: "tk_test",
   discoveryTimeoutMs: 5000,
   environmentModels: [],
@@ -32,14 +34,48 @@ const completionInit = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-const BASE_URL = "https://api.otari.ai/api/v1";
-const COMPLETIONS_URL = `${BASE_URL}/chat/completions`;
+const ok = () => json(200, { ok: true });
+
+const SEARCH_REFUSAL = "web search is not enabled for this workspace";
+
+describe("WebSearchState", () => {
+  it("is active while unknown or available, offered only when available", () => {
+    const state = new WebSearchState();
+    expect([state.active, state.offered]).toEqual([true, false]);
+    state.probed("available");
+    expect([state.active, state.offered]).toEqual([true, true]);
+    state.probed("unavailable");
+    expect([state.active, state.offered]).toEqual([false, false]);
+  });
+
+  it("holds a refusal until the next probe, whatever it answers", () => {
+    const onChange = vi.fn();
+    const state = new WebSearchState(onChange);
+    state.probed("available");
+    state.refuse("no backend");
+    expect([state.active, state.offered]).toEqual([false, false]);
+    state.probed("unknown");
+    expect(state.active).toBe(true);
+    expect(onChange).toHaveBeenCalledTimes(3);
+  });
+
+  it("reports each refusal reason once", () => {
+    const onChange = vi.fn();
+    const state = new WebSearchState(onChange);
+    expect(state.refuse("no backend")).toBe(true);
+    expect(state.refuse("no backend")).toBe(false);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    state.probed("unknown");
+    expect(state.refuse("no backend")).toBe(false);
+    expect(state.refuse("workspace off")).toBe(true);
+  });
+});
 
 describe("probeWebSearch", () => {
   it("reports available when the catalog lists otari_web_search as available", async () => {
     const fetcher = vi.fn(
       async (url: string | URL | Request, init?: RequestInit) => {
-        expect(String(url)).toBe("https://api.otari.ai/api/v1/tools");
+        expect(String(url)).toBe(`${BASE_URL}/tools`);
         expect(new Headers(init?.headers).get("authorization")).toBe(
           "Bearer tk_test",
         );
@@ -97,399 +133,89 @@ describe("probeWebSearch", () => {
   });
 });
 
-describe("webSearchRefusalDetail", () => {
-  it.each([
-    "otari_web_search tool requested but no search backend is configured on this gateway. Set OTARI_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`.",
-    "web search is not enabled for this workspace",
-    "otari_web_search declarations contain an unsupported field",
-    "otari_web_search and otari_web_fetch cannot be combined with otari_code_execution or mcp_servers in the same request yet; pick one.",
-  ])("matches the gateway refusal: %s", (detail) => {
-    expect(webSearchRefusalDetail({ detail })).toBe(detail);
-  });
-
-  it("matches a 422 validation error from a gateway that predates the tool", () => {
-    expect(
-      webSearchRefusalDetail({
-        detail: [
-          {
-            type: "union_tag_invalid",
-            loc: ["body", "tools", 0],
-            msg: "Input tag 'otari_web_search' found using 'type' does not match any of the expected tags: 'function'",
-            input: { type: "otari_web_search" },
-          },
-        ],
-      }),
-    ).toBe(
-      "Input tag 'otari_web_search' found using 'type' does not match any of the expected tags: 'function'",
+describe("rejectionReason", () => {
+  it("reads a string detail, or the messages of a validation error", async () => {
+    expect(await rejectionReason(json(403, { detail: SEARCH_REFUSAL }))).toBe(
+      SEARCH_REFUSAL,
     );
     expect(
-      webSearchRefusalDetail({
-        detail: [
-          {
-            loc: ["body", "tools", 1],
-            msg: "Field required",
-            input: { type: "otari_web_search" },
-          },
-        ],
-      }),
-    ).toBe("Field required");
+      await rejectionReason(
+        json(422, {
+          detail: [
+            { loc: ["body", "tools", 0], msg: "unknown tool type" },
+            { loc: ["body"], msg: "second problem" },
+          ],
+        }),
+      ),
+    ).toBe("unknown tool type; second problem");
   });
 
-  it("ignores other rejections and non-string details", () => {
-    expect(
-      webSearchRefusalDetail({
-        detail:
-          "reasoning_effort 'medium' is unsupported; available values: low, high",
-      }),
-    ).toBeUndefined();
-    expect(
-      webSearchRefusalDetail({
-        detail: "No credential is configured for 'mzai' on this deployment",
-      }),
-    ).toBeUndefined();
-    expect(
-      webSearchRefusalDetail({ detail: [{ loc: ["tools"], msg: "x" }] }),
-    ).toBeUndefined();
-    expect(
-      webSearchRefusalDetail({ error: { message: "otari_web_search" } }),
-    ).toBeUndefined();
-    expect(webSearchRefusalDetail("otari_web_search")).toBeUndefined();
-  });
-});
-
-describe("webSearchActive", () => {
-  it("is optimistic on unknown, off on unavailable or rejected", () => {
-    const state = createWebSearchState();
-    expect(webSearchActive(state)).toBe(true);
-    state.availability = "available";
-    expect(webSearchActive(state)).toBe(true);
-    state.availability = "unavailable";
-    expect(webSearchActive(state)).toBe(false);
-    state.availability = "available";
-    state.rejected = true;
-    expect(webSearchActive(state)).toBe(false);
+  it("falls back to the status when the body says nothing usable", async () => {
+    expect(await rejectionReason(new Response("nope", { status: 400 }))).toBe(
+      "HTTP 400",
+    );
+    expect(await rejectionReason(json(422, { detail: [{}] }))).toBe("HTTP 422");
   });
 });
 
 describe("wrapFetchWithWebSearch", () => {
-  const ok = () => json(200, { ok: true });
+  /** A fetch stub that records each request body and answers from `reply`. */
+  function harness(
+    reply: (call: number) => Response | Promise<Response> = ok,
+    state = new WebSearchState(),
+  ) {
+    const bodies: string[] = [];
+    const fetcher = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        bodies.push(String(init?.body ?? ""));
+        return reply(bodies.length);
+      },
+    );
+    const onRefused = vi.fn();
+    const wrapped = wrapFetchWithWebSearch(fetcher as typeof fetch, {
+      baseUrl: BASE_URL,
+      state,
+      onRefused,
+    });
+    const sentTools = (call: number) => JSON.parse(bodies[call]).tools;
+    return { wrapped, fetcher, bodies, sentTools, onRefused, state };
+  }
 
   it("appends the declaration after the request's own tools", async () => {
-    const fetcher = vi.fn(
-      async (_input: string | URL | Request, _init?: RequestInit) => ok(),
-    );
-    const state = createWebSearchState();
-    state.availability = "available";
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      state,
-      vi.fn(),
-    );
-    const body = {
-      model: "m",
-      stream: true,
-      tools: [{ type: "function", function: { name: "bash" } }],
-    };
-    await wrapped(COMPLETIONS_URL, completionInit(body));
-    const sent = JSON.parse(String(vi.mocked(fetcher).mock.calls[0][1]?.body));
-    expect(sent.tools).toEqual([
-      { type: "function", function: { name: "bash" } },
-      { type: "otari_web_search" },
-    ]);
-    expect(sent.model).toBe("m");
-  });
-
-  it("creates the tools array when the request has none", async () => {
-    const fetcher = vi.fn(
-      async (_input: string | URL | Request, _init?: RequestInit) => ok(),
-    );
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      createWebSearchState(),
-      vi.fn(),
-    );
-    await wrapped(COMPLETIONS_URL, completionInit({ model: "m" }));
-    const sent = JSON.parse(String(vi.mocked(fetcher).mock.calls[0][1]?.body));
-    expect(sent.tools).toEqual([{ type: "otari_web_search" }]);
-  });
-
-  it("does not declare the tool twice", async () => {
-    const fetcher = vi.fn(
-      async (_input: string | URL | Request, _init?: RequestInit) => ok(),
-    );
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      createWebSearchState(),
-      vi.fn(),
-    );
+    const { wrapped, sentTools, bodies } = harness();
     await wrapped(
       COMPLETIONS_URL,
       completionInit({
         model: "m",
-        tools: [{ type: "otari_web_search", max_uses: 2 }],
+        tools: [{ type: "function", function: { name: "bash" } }],
       }),
     );
-    const sent = JSON.parse(String(vi.mocked(fetcher).mock.calls[0][1]?.body));
-    expect(sent.tools).toEqual([{ type: "otari_web_search", max_uses: 2 }]);
-  });
-
-  it("leaves other requests and non-JSON bodies alone", async () => {
-    const fetcher = vi.fn(
-      async (_input: string | URL | Request, _init?: RequestInit) => ok(),
-    );
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      createWebSearchState(),
-      vi.fn(),
-    );
-    await wrapped("https://api.otari.ai/api/v1/models", { method: "GET" });
-    await wrapped(COMPLETIONS_URL, { method: "GET" });
-    await wrapped(COMPLETIONS_URL, { method: "POST" });
-    expect(fetcher).toHaveBeenCalledTimes(3);
-    for (const call of vi.mocked(fetcher).mock.calls) {
-      expect(String(call[1]?.body ?? "")).not.toContain("otari_web_search");
-    }
-  });
-
-  it("declares nothing once the catalog said unavailable", async () => {
-    const fetcher = vi.fn(
-      async (_input: string | URL | Request, _init?: RequestInit) => ok(),
-    );
-    const state = createWebSearchState();
-    state.availability = "unavailable";
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      state,
-      vi.fn(),
-    );
-    await wrapped(COMPLETIONS_URL, completionInit({ model: "m" }));
-    expect(String(vi.mocked(fetcher).mock.calls[0][1]?.body)).not.toContain(
-      "otari_web_search",
-    );
-  });
-
-  it.each([400, 403])(
-    "retries without the declaration after a %s refusal, then stops declaring",
-    async (status) => {
-      const detail =
-        status === 403
-          ? "web search is not enabled for this workspace"
-          : "otari_web_search tool requested but no search backend is configured on this gateway.";
-      const bodies: string[] = [];
-      const fetcher = vi.fn(
-        async (_input: string | URL | Request, init?: RequestInit) => {
-          bodies.push(String(init?.body));
-          return bodies.length === 1 ? json(status, { detail }) : ok();
-        },
-      );
-      const state = createWebSearchState();
-      state.availability = "available";
-      const onRejected = vi.fn();
-      const wrapped = wrapFetchWithWebSearch(
-        fetcher as typeof fetch,
-        BASE_URL,
-        state,
-        onRejected,
-      );
-
-      const response = await wrapped(
-        COMPLETIONS_URL,
-        completionInit({ model: "m", tools: [] }),
-      );
-      expect(response.status).toBe(200);
-      expect(fetcher).toHaveBeenCalledTimes(2);
-      expect(JSON.parse(bodies[0]).tools).toEqual([
-        { type: "otari_web_search" },
-      ]);
-      expect(JSON.parse(bodies[1]).tools).toEqual([]);
-      expect(state.rejected).toBe(true);
-      expect(onRejected).toHaveBeenCalledTimes(1);
-      expect(onRejected).toHaveBeenCalledWith(detail);
-
-      await wrapped(COMPLETIONS_URL, completionInit({ model: "m" }));
-      expect(JSON.parse(bodies[2]).tools).toBeUndefined();
-      expect(onRejected).toHaveBeenCalledTimes(1);
-    },
-  );
-
-  it("returns an unrelated 400 as-is, with no retry and no state change", async () => {
-    const fetcher = vi.fn(async () =>
-      json(400, { detail: "reasoning_effort 'medium' is unsupported" }),
-    );
-    const state = createWebSearchState();
-    const onRejected = vi.fn();
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      state,
-      onRejected,
-    );
-    const response = await wrapped(
-      COMPLETIONS_URL,
-      completionInit({ model: "m" }),
-    );
-    expect(response.status).toBe(400);
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(state.rejected).toBe(false);
-    expect(webSearchActive(state)).toBe(true);
-    expect(onRejected).not.toHaveBeenCalled();
-  });
-
-  const refusal = (status = 400) =>
-    json(status, {
-      detail:
-        "otari_web_search tool requested but no search backend is configured on this gateway.",
-    });
-
-  it("retries a 422 validation refusal without the declaration", async () => {
-    const bodies: string[] = [];
-    const fetcher = vi.fn(
-      async (_input: string | URL | Request, init?: RequestInit) => {
-        bodies.push(String(init?.body));
-        return bodies.length === 1
-          ? json(422, {
-              detail: [
-                {
-                  loc: ["body", "tools", 0],
-                  msg: "Input tag 'otari_web_search' found using 'type' does not match any of the expected tags: 'function'",
-                },
-              ],
-            })
-          : ok();
-      },
-    );
-    const state = createWebSearchState();
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      state,
-      vi.fn(),
-    );
-    const response = await wrapped(
-      COMPLETIONS_URL,
-      completionInit({ model: "m" }),
-    );
-    expect(response.status).toBe(200);
-    expect(JSON.parse(bodies[1]).tools).toBeUndefined();
-    expect(state.rejected).toBe(true);
-  });
-
-  it("strips the caller's own declaration on retry", async () => {
-    const bodies: string[] = [];
-    const fetcher = vi.fn(
-      async (_input: string | URL | Request, init?: RequestInit) => {
-        bodies.push(String(init?.body));
-        return bodies.length === 1 ? refusal() : ok();
-      },
-    );
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      createWebSearchState(),
-      vi.fn(),
-    );
-    const response = await wrapped(
-      COMPLETIONS_URL,
-      completionInit({
-        model: "m",
-        tools: [
-          { type: "function", function: { name: "bash" } },
-          { type: "otari_web_search", max_uses: 2 },
-        ],
-      }),
-    );
-    expect(response.status).toBe(200);
-    expect(JSON.parse(bodies[1]).tools).toEqual([
+    expect(sentTools(0)).toEqual([
       { type: "function", function: { name: "bash" } },
+      { type: "otari_web_search" },
     ]);
+    expect(JSON.parse(bodies[0]).model).toBe("m");
   });
 
-  it("warns once when concurrent requests are refused, and notifies state changes", async () => {
-    const pending: Array<() => void> = [];
-    let calls = 0;
-    const fetcher = vi.fn(async () => {
-      calls += 1;
-      if (calls > 3) return ok();
-      await new Promise<void>((resolve) => pending.push(resolve));
-      return refusal();
-    });
-    const onChange = vi.fn();
-    const state = createWebSearchState(onChange);
-    const onRejected = vi.fn();
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      state,
-      onRejected,
-    );
-    const requests = [1, 2, 3].map(() =>
-      wrapped(COMPLETIONS_URL, completionInit({ model: "m" })),
-    );
-    await vi.waitFor(() => expect(pending).toHaveLength(3));
-    for (const resolve of pending) resolve();
-    const responses = await Promise.all(requests);
-    expect(responses.map((r) => r.status)).toEqual([200, 200, 200]);
-    expect(onRejected).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledTimes(1);
-  });
-
-  it("cancels the refused response's body before retrying", async () => {
-    // clone() swaps a real Response's body for a tee branch, so spy on a
-    // stand-in whose body stays put.
-    const cancel = vi.fn(async () => {});
-    const refused = {
-      status: 400,
-      clone: () => refusal(),
-      body: { cancel },
-    } as unknown as Response;
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(refused)
-      .mockResolvedValueOnce(ok());
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      createWebSearchState(),
-      vi.fn(),
-    );
+  it("creates the tools array when the request has none", async () => {
+    const { wrapped, sentTools } = harness();
     await wrapped(COMPLETIONS_URL, completionInit({ model: "m" }));
-    expect(cancel).toHaveBeenCalled();
+    expect(sentTools(0)).toEqual([{ type: "otari_web_search" }]);
   });
 
   it("declares on this deployment's completions URL with a query or trailing slash", async () => {
-    const fetcher = vi.fn(
-      async (_input: string | URL | Request, _init?: RequestInit) => ok(),
-    );
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      createWebSearchState(),
-      vi.fn(),
-    );
+    const { wrapped, sentTools } = harness();
     await wrapped(`${COMPLETIONS_URL}?api-version=1`, completionInit({}));
     await wrapped(`${COMPLETIONS_URL}/`, completionInit({}));
-    for (const call of vi.mocked(fetcher).mock.calls) {
-      expect(JSON.parse(String(call[1]?.body)).tools).toEqual([
-        { type: "otari_web_search" },
-      ]);
-    }
+    expect(sentTools(0)).toEqual([{ type: "otari_web_search" }]);
+    expect(sentTools(1)).toEqual([{ type: "otari_web_search" }]);
   });
 
-  it("never declares on completions sent anywhere but the Otari base URL", async () => {
-    const fetcher = vi.fn(
-      async (_input: string | URL | Request, _init?: RequestInit) => ok(),
-    );
-    const wrapped = wrapFetchWithWebSearch(
-      fetcher as typeof fetch,
-      BASE_URL,
-      createWebSearchState(),
-      vi.fn(),
-    );
+  it("leaves everything but an Otari completion with a JSON body alone", async () => {
+    const { wrapped, fetcher, bodies } = harness();
+    const ownDeclaration = completionInit({
+      tools: [{ type: "otari_web_search", max_uses: 2 }],
+    });
     await wrapped(
       "https://api.openai.com/v1/chat/completions",
       completionInit({}),
@@ -498,8 +224,108 @@ describe("wrapFetchWithWebSearch", () => {
       "https://api.otari.ai/other/chat/completions",
       completionInit({}),
     );
-    for (const call of vi.mocked(fetcher).mock.calls) {
-      expect(String(call[1]?.body)).not.toContain("otari_web_search");
-    }
+    await wrapped(`${BASE_URL}/models`, { method: "GET" });
+    await wrapped(COMPLETIONS_URL, { method: "GET" });
+    await wrapped(COMPLETIONS_URL, { method: "POST" });
+    await wrapped(COMPLETIONS_URL, ownDeclaration);
+    expect(fetcher).toHaveBeenCalledTimes(6);
+    expect(bodies.slice(0, 5).join("")).not.toContain("otari_web_search");
+    expect(vi.mocked(fetcher).mock.calls[5][1]).toBe(ownDeclaration);
+  });
+
+  it("declares nothing once the catalog said unavailable", async () => {
+    const state = new WebSearchState();
+    state.probed("unavailable");
+    const { wrapped, bodies } = harness(ok, state);
+    await wrapped(COMPLETIONS_URL, completionInit({ model: "m" }));
+    expect(bodies[0]).not.toContain("otari_web_search");
+  });
+
+  it.each([400, 403, 422])(
+    "stops declaring when a %s goes away without the declaration",
+    async (status) => {
+      const { wrapped, fetcher, sentTools, onRefused, state } = harness(
+        (call) =>
+          call === 1 ? json(status, { detail: SEARCH_REFUSAL }) : ok(),
+      );
+      const response = await wrapped(
+        COMPLETIONS_URL,
+        completionInit({ model: "m", tools: [] }),
+      );
+      expect(response.status).toBe(200);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(sentTools(0)).toEqual([{ type: "otari_web_search" }]);
+      expect(sentTools(1)).toEqual([]);
+      expect(state.active).toBe(false);
+      expect(onRefused).toHaveBeenCalledWith(SEARCH_REFUSAL);
+
+      await wrapped(COMPLETIONS_URL, completionInit({ model: "m" }));
+      expect(sentTools(2)).toBeUndefined();
+      expect(onRefused).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("keeps web search on when the error survives the retry", async () => {
+    const { wrapped, fetcher, onRefused, state } = harness((call) =>
+      json(400, { detail: `reasoning_effort unsupported (${call})` }),
+    );
+    const response = await wrapped(
+      COMPLETIONS_URL,
+      completionInit({ model: "m" }),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(await response.json()).toEqual({
+      detail: "reasoning_effort unsupported (2)",
+    });
+    expect(state.active).toBe(true);
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
+  it("checks a client error against the declaration once per refresh", async () => {
+    const { wrapped, fetcher, state } = harness(() =>
+      json(400, { detail: "unknown model" }),
+    );
+    await wrapped(COMPLETIONS_URL, completionInit({}));
+    await wrapped(COMPLETIONS_URL, completionInit({}));
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    state.probed("unknown");
+    await wrapped(COMPLETIONS_URL, completionInit({}));
+    expect(fetcher).toHaveBeenCalledTimes(5);
+  });
+
+  it("does not retry once a declared request has succeeded", async () => {
+    const { wrapped, fetcher, state } = harness((call) =>
+      call === 1 ? ok() : json(400, { detail: "unknown model" }),
+    );
+    await wrapped(COMPLETIONS_URL, completionInit({}));
+    const response = await wrapped(COMPLETIONS_URL, completionInit({}));
+    expect(response.status).toBe(400);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(state.active).toBe(true);
+  });
+
+  it("does not retry server errors", async () => {
+    const { wrapped, fetcher, state } = harness(() => json(500, {}));
+    const response = await wrapped(COMPLETIONS_URL, completionInit({}));
+    expect(response.status).toBe(500);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(state.active).toBe(true);
+  });
+
+  it("warns once when concurrent requests are refused", async () => {
+    const pending: Array<() => void> = [];
+    const { wrapped, onRefused } = harness(async (call) => {
+      if (call > 3) return ok();
+      await new Promise<void>((resolve) => pending.push(resolve));
+      return json(400, { detail: SEARCH_REFUSAL });
+    });
+    const requests = [1, 2, 3].map(() =>
+      wrapped(COMPLETIONS_URL, completionInit({ model: "m" })),
+    );
+    await vi.waitFor(() => expect(pending).toHaveLength(3));
+    for (const resolve of pending) resolve();
+    const responses = await Promise.all(requests);
+    expect(responses.map((r) => r.status)).toEqual([200, 200, 200]);
+    expect(onRefused).toHaveBeenCalledTimes(1);
   });
 });
