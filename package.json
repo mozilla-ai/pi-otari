@@ -19,6 +19,7 @@
     "node": ">=22.19.0"
   },
   "files": [
+    "index.ts",
     "assets",
     "src",
     "README.md",
@@ -45,7 +46,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./index.ts"
     ],
     "image": "https://raw.githubusercontent.com/mozilla-ai/pi-otari/main/assets/gallery/otari-logo.png"
   },

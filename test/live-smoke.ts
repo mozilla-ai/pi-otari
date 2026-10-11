@@ -28,7 +28,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const RUN_TIMEOUT_MS = 300_000;
 const PROMPT = "Reply with exactly: ok";
 /** Loaded by path through Pi's own extension loader, as `pi -e` does. */
-const EXTENSION_PATH = resolve(import.meta.dirname, "../src/index.ts");
+const EXTENSION_PATH = resolve(import.meta.dirname, "../index.ts");
 const THINKING_LEVELS = Object.keys(THINKING_LEVEL_MAP);
 type LiveThinkingLevel = keyof typeof THINKING_LEVEL_MAP;
 /** Fields the extension takes from Otari's entry rather than defaulting. */
@@ -246,7 +246,7 @@ async function main(): Promise<void> {
       const auth = await session.modelRuntime.getAuth("otari");
       assert.ok(
         auth,
-        "Pi loaded the extension, but it registered no otari provider. Run `pi -e ./src/index.ts` with the same OTARI_API_KEY and OTARI_BASE_URL to see the reason it reports at startup",
+        "Pi loaded the extension, but it registered no otari provider. Run `pi -e ./index.ts` with the same OTARI_API_KEY and OTARI_BASE_URL to see the reason it reports at startup",
       );
       return session;
     });
