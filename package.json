@@ -57,7 +57,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.5",
     "@earendil-works/pi-ai": "0.99.2",
-    "@earendil-works/pi-coding-agent": "0.99.2",
+    "@earendil-works/pi-coding-agent": "1.1.0",
     "@types/node": "^26.1.2",
     "husky": "^9.1.7",
     "lint-staged": "^17.2.0",
