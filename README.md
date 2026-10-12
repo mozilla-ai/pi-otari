@@ -97,6 +97,39 @@ Models that Otari discovery marks as reasoning-capable expose Pi's `minimal`, `l
 
 Otari discovery does not yet provide each model's supported reasoning levels, so the levels exposed for a reasoning model are optimistic: an upstream model may reject a level it does not support. The extension preserves that error without silently retrying at a different level or without reasoning. When the upstream error reports supported values, they appear in Pi's error message.
 
+## Subagent routing
+
+With [pi-subagents](https://github.com/nicobailon/pi-subagents) installed, the extension can ask Otari which model a new subagent should run on. A subagent starts with an empty prompt cache, so the moment it is spawned is where a cheaper model costs nothing. Otari puts the task to a decision model and recommends the cheapest candidate that should do it well on the first attempt.
+
+Routing is off by default. Turn it on in Pi's settings, globally in `~/.pi/agent/settings.json` or per project in `.pi/settings.json` (Pi reads a project's settings only once you trust the project):
+
+```json
+{
+  "otari": {
+    "subagentRouting": {
+      "enabled": true,
+      "candidates": {
+        "openai:gpt-5-mini": "Simple, mechanical work: find, search, read and report.",
+        "anthropic:claude-sonnet-5-5": "Moderate reasoning: contained code changes, tests.",
+        "anthropic:claude-opus-5-5": "Hard reasoning: design choices, subtle bugs, large refactors."
+      }
+    }
+  }
+}
+```
+
+`candidates` is optional. Each key is an Otari model id, and each value says what the model is for (or is `null`). Without `candidates`, Otari chooses among its own list for Pi. Models that Pi cannot run, because discovery did not list them or there is no credential, are left out of the request.
+
+When the parent model's message ends, the extension asks Otari about each single `subagent` launch in it, all at once. It sends the agent name, the task and the parent model, waits at most 3 seconds, and starts the subagent on `otari/<recommended model>`. A thinking level set on the launch's own model, such as `:high`, is kept when the recommended model supports reasoning. A notice shows the choice. If anything fails, such as a timeout, an error from Otari, or a model Pi cannot run, the subagent starts on the model it would have had anyway, and the notice says why.
+
+Limits:
+
+- It needs Pi 0.99.0 or newer, and an Otari API key from `/login otari` or `OTARI_API_KEY`.
+- It needs an Otari gateway that recommends models for Pi ([mozilla-ai/otari#2198](https://github.com/mozilla-ai/otari/issues/2198)), with a decision provider configured. Standalone (self-hosted) deployments serve the route.
+- Only single launches are routed. Workflows, parallel tasks, chains, `/run`, and other launches that do not go through the `subagent` tool call start on their usual model.
+- Otari is asked when the message ends, before Pi checks each tool call. A launch that Pi or another extension then blocks has already been sent to Otari.
+- The recommended model counts as an explicit model in pi-subagents, so it wins over an agent's own `model:`. An enforced `subagents.modelScope` can still refuse it.
+
 ## Non-interactive authentication
 
 For CI, containers, and other noninteractive environments, provide the API key through `OTARI_API_KEY`:
@@ -131,7 +164,7 @@ HTTP is accepted only for loopback development endpoints.
 
 ## Privacy and security
 
-Model requests using `otari/*` pass through Otari and the selected upstream provider. The extension does not maintain its own credential file. When you use `/login otari`, Pi stores the API key in `~/.pi/agent/auth.json`; when you use `OTARI_API_KEY`, the key remains environment-provided. The extension stores no prompts, responses, tool content, or telemetry. Pi persists provider model metadata in its native model store. Discovery rejects redirects and sends the token only to the configured model-discovery endpoint. When discovery returns `404` from a self-hosted gateway, the extension also requests that gateway's public health route on the other API prefix, again without the token.
+Model requests using `otari/*` pass through Otari and the selected upstream provider. The extension does not maintain its own credential file. When you use `/login otari`, Pi stores the API key in `~/.pi/agent/auth.json`; when you use `OTARI_API_KEY`, the key remains environment-provided. The extension stores no prompts, responses, tool content, or telemetry. Pi persists provider model metadata in its native model store. Discovery rejects redirects and sends the token only to the configured model-discovery endpoint. When discovery returns `404` from a self-hosted gateway, the extension also requests that gateway's public health route on the other API prefix, again without the token. With [subagent routing](#subagent-routing) on, the extension also sends, for each single `subagent` launch in the parent model's messages (even one that is later blocked), the subagent's task, agent name, model ids, Pi's session id and the tool call id to `{OTARI_BASE_URL}/routing/recommend`, with the token and without following redirects. The session id lets Otari relate the launches of one session. A trusted project's `.pi/settings.json` can turn routing on, so trust only projects you would let send subagent tasks to Otari.
 
 ## Troubleshooting
 
