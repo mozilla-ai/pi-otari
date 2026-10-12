@@ -101,7 +101,13 @@ export function selectorsToModels(selectors: string[]): OtariModel[] {
   return selectors.map((id) => ({ id, name: id, source: "environment" }));
 }
 
-export function toProviderModel(model: OtariModel): ProviderModelConfig {
+/** Otari serves chat models only. */
+type ProviderChatModelConfig = Extract<
+  ProviderModelConfig,
+  { reasoning: boolean }
+>;
+
+export function toProviderModel(model: OtariModel): ProviderChatModelConfig {
   return {
     id: model.id,
     name: model.name ?? model.id,
