@@ -9,14 +9,16 @@ import { registerLifecycleUI } from "./status.js";
 import type { OtariConfig, RuntimeState } from "./types.js";
 
 const MINIMUM_PI_VERSION = [0, 81, 0] as const;
+// Subagent routing reads its settings with pi.getSettings(), added in 0.99.0.
+const ROUTING_PI_VERSION = [0, 99, 0] as const;
 
-function isSupportedPiVersion(version: string): boolean {
+function isAtLeast(version: string, minimum: readonly number[]): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
   if (!match) return false;
   const actual = match.slice(1).map(Number);
-  for (let index = 0; index < MINIMUM_PI_VERSION.length; index += 1) {
-    if (actual[index] !== MINIMUM_PI_VERSION[index]) {
-      return actual[index] > MINIMUM_PI_VERSION[index];
+  for (let index = 0; index < minimum.length; index += 1) {
+    if (actual[index] !== minimum[index]) {
+      return actual[index] > minimum[index];
     }
   }
   return !version.slice(match[0].length).startsWith("-");
@@ -40,7 +42,8 @@ export function createOtariExtension(
     const catalog: Catalog = new Set();
     const ui = registerLifecycleUI(pi, () => state, catalog);
 
-    if (!isSupportedPiVersion(dependencies.piVersion ?? VERSION)) {
+    const piVersion = dependencies.piVersion ?? VERSION;
+    if (!isAtLeast(piVersion, MINIMUM_PI_VERSION)) {
       state = {
         models: [],
         discoverySource: "none",
@@ -77,11 +80,19 @@ export function createOtariExtension(
       return;
     }
 
-    const { registerOtariProvider } = await import("./provider.js");
+    const [{ registerOtariProvider }, routing] = await Promise.all([
+      import("./provider.js"),
+      isAtLeast(piVersion, ROUTING_PI_VERSION)
+        ? import("./subagent-routing.js")
+        : undefined,
+    ]);
     registerOtariProvider(pi, config, [], {
       fetch: dependencies.fetch ?? fetch,
       onDiagnostic: (diagnostic) => ui.reportDiagnostic(diagnostic),
       catalog,
+    });
+    routing?.registerSubagentRouting(pi, config, {
+      fetch: dependencies.fetch ?? fetch,
     });
     state = { ...state, config };
   };
