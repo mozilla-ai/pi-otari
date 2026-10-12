@@ -210,9 +210,10 @@ describe("Pi–Otari integration", () => {
       expect(last.errorMessage).not.toContain("127.0.0.1");
       expect(last.errorMessage).toContain('does not list "mzai:test-model"');
       expect(last.errorMessage).toContain('listed as "nebius:test-model"');
-      // The gateway's reason travels in a `detail` field the OpenAI client
-      // does not surface, so the explanation is what the user has to go on.
-      expect(last.errorMessage).toMatch(/\n\n400 status code \(no body\)$/);
+      // The gateway's own reason follows the explanation.
+      expect(last.errorMessage).toMatch(
+        /\n\n400 \{"detail":"No credential is configured for 'mzai' on this deployment"\}$/,
+      );
     } finally {
       session.dispose();
       server.close();

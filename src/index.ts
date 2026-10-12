@@ -10,7 +10,7 @@ import type { OtariConfig, RuntimeState } from "./types.js";
 
 const MINIMUM_PI_VERSION = [0, 81, 0] as const;
 
-function supportsNativeProviderAuth(version: string): boolean {
+function isSupportedPiVersion(version: string): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
   if (!match) return false;
   const actual = match.slice(1).map(Number);
@@ -40,7 +40,7 @@ export function createOtariExtension(
     const catalog: Catalog = new Set();
     const ui = registerLifecycleUI(pi, () => state, catalog);
 
-    if (!supportsNativeProviderAuth(dependencies.piVersion ?? VERSION)) {
+    if (!isSupportedPiVersion(dependencies.piVersion ?? VERSION)) {
       state = {
         models: [],
         discoverySource: "none",
