@@ -49,6 +49,19 @@ describe("package scaffold", () => {
     expect(registerProvider).toHaveBeenCalledWith(
       expect.objectContaining({ id: "otari" }),
     );
+    // Subagent routing needs Pi 0.99.0.
+    expect(pi.on).not.toHaveBeenCalledWith("tool_call", expect.anything());
+  });
+
+  it("routes subagents on Pi 0.99.0", async () => {
+    const pi = {
+      on: vi.fn(),
+      registerProvider: vi.fn(),
+    } as unknown as ExtensionAPI;
+
+    await createOtariExtension({ env: {}, piVersion: "0.99.0" })(pi);
+
+    expect(pi.on).toHaveBeenCalledWith("tool_call", expect.any(Function));
   });
 
   it("reports a clear upgrade message on unsupported Pi versions", async () => {

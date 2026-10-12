@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import {
   createServer,
   type IncomingMessage,
@@ -309,6 +309,145 @@ describe("Pi–Otari integration", () => {
       await session.prompt("Use echo, then finish.");
       expect(completionCount).toBe(2);
       expect(session.state.messages.at(-1)?.role).toBe("assistant");
+    } finally {
+      session.dispose();
+      server.close();
+      await once(server, "close");
+    }
+  });
+
+  it("starts a subagent on the model Otari recommends", async () => {
+    let recommendBody: Record<string, unknown> | undefined;
+    let spawnedModel: string | undefined;
+    let completionCount = 0;
+    const server = createServer(async (request, response) => {
+      if (request.method === "GET" && request.url === "/api/v1/models") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            data: [
+              { id: "anthropic:claude-opus-5-5" },
+              { id: "openai:gpt-5-mini" },
+            ],
+          }),
+        );
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        request.url === "/api/v1/routing/recommend"
+      ) {
+        expect(request.headers.authorization).toBe("Bearer tk_integration");
+        recommendBody = await body(request);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            model: "openai:gpt-5-mini",
+            reason: "jev chose openai:gpt-5-mini",
+          }),
+        );
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        request.url === "/api/v1/chat/completions"
+      ) {
+        completionCount += 1;
+        sse(
+          response,
+          completionCount === 1
+            ? [
+                toolChunk({
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_spawn",
+                      type: "function",
+                      function: {
+                        name: "subagent",
+                        arguments: JSON.stringify({
+                          agent: "scout",
+                          task: "Find the config loader",
+                        }),
+                      },
+                    },
+                  ],
+                }),
+                toolChunk({}, "tool_calls"),
+              ]
+            : [
+                toolChunk({ role: "assistant", content: "done" }),
+                toolChunk({}, "stop"),
+              ],
+        );
+        return;
+      }
+      response.writeHead(404).end();
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Expected TCP server");
+
+    vi.stubEnv("OTARI_API_KEY", "tk_integration");
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/api/v1`);
+    const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-integration-"));
+    const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
+    await writeFile(
+      join(agentDir, "settings.json"),
+      JSON.stringify({ otari: { subagentRouting: { enabled: true } } }),
+    );
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      extensionFactories: [
+        createOtariExtension(),
+        // Stands in for pi-subagents' tool, to see the input it receives.
+        (pi: ExtensionAPI) =>
+          pi.registerTool({
+            name: "subagent",
+            label: "Subagent",
+            description: "Start a subagent",
+            parameters: Type.Object({
+              agent: Type.String(),
+              task: Type.String(),
+              model: Type.Optional(Type.String()),
+            }),
+            async execute(_id, params) {
+              spawnedModel = params.model;
+              return { content: [{ type: "text", text: "ok" }], details: {} };
+            },
+          }),
+      ],
+    });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({
+      cwd,
+      agentDir,
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+    try {
+      await session.modelRuntime.refresh({ allowNetwork: true });
+      const model = session.modelRuntime.getModel(
+        "otari",
+        "anthropic:claude-opus-5-5",
+      );
+      if (!model) throw new Error("Expected Otari model");
+      await session.setModel(model);
+      await session.prompt("Ask a scout to find the config loader.");
+
+      expect(spawnedModel).toBe("otari/openai:gpt-5-mini");
+      expect(recommendBody).toMatchObject({
+        harness: "pi",
+        tool_use_id: "call_spawn",
+        agent_type: "scout",
+        prompt: "Find the config loader",
+        parent_model: "otari/anthropic:claude-opus-5-5",
+      });
+      expect(recommendBody).not.toHaveProperty("candidates");
     } finally {
       session.dispose();
       server.close();
