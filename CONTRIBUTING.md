@@ -32,13 +32,19 @@ This checks formatting, lint rules, TypeScript types, and the test suite.
 Load the extension directly from the repository:
 
 ```bash
-pi -e ./src/index.ts
+pi -e ./index.ts
 ```
+
+The repository root `index.ts` only re-exports the implementation from
+`src/index.ts`. Pi labels a package extension as `<package name>:<entry
+ directory>`, and drops the `:<directory>` part only for an `index.*` file at
+the package root, so the extra file keeps Pi's loaded-extension list showing
+`@mozilla-ai/pi-otari` instead of `@mozilla-ai/pi-otari:src`.
 
 Then run `/login otari` and enter a disposable test key in Pi's secret authentication prompt. The prompt is separate from chat; never paste a credential into a normal conversation message. For deterministic noninteractive testing, continue to use:
 
 ```bash
-OTARI_API_KEY=tk_example pi -e ./src/index.ts
+OTARI_API_KEY=tk_example pi -e ./index.ts
 ```
 
 If the npm package is already installed, disable it temporarily with `pi config`, or pass `--no-extensions` so only the explicit `-e` path loads; otherwise Pi loads both the published and local copies.
@@ -48,13 +54,13 @@ To test against self-hosted Otari, set the base URL for the same command. The va
 ```bash
 OTARI_API_KEY=your_otari_key \
 OTARI_BASE_URL=https://otari.example.com/api/v1 \
-pi -e ./src/index.ts
+pi -e ./index.ts
 ```
 
 NOTE: `pi --list-models otari` only prints Pi's cached catalog. To exercise discovery, open `/model` in the interactive session. To exercise inference without discovery, pass a selector through `OTARI_MODELS` and run one prompt in print mode:
 
 ```bash
-OTARI_MODELS=<model id> pi --no-extensions -e ./src/index.ts --no-session -p \
+OTARI_MODELS=<model id> pi --no-extensions -e ./index.ts --no-session -p \
   --model "otari/<model id>" "Reply with exactly: ok"
 ```
 
@@ -66,7 +72,7 @@ OTARI_MODELS=<model id> pi --no-extensions -e ./src/index.ts --no-session -p \
 The stages, in order:
 
 1. **configuration**: the variables below are read, with the token and URL going through the extension's own configuration parser, so a URL the extension would reject fails here with its reason.
-2. **extension loads in a Pi session**: Pi loads `src/index.ts` by path, the way `pi -e` does, into a session whose state lives in temporary directories. Fails when the extension registers no provider.
+2. **extension loads in a Pi session**: Pi loads `index.ts` by path, the way `pi -e` does, into a session whose state lives in temporary directories. Fails when the extension registers no provider.
 3. **model discovery through the extension**: Pi refreshes the Otari catalog over the network. Fails with the extension's own diagnostic, or when the configured model is missing from the list, naming the current selector when the same model is listed under another prefix. Also reports which capability fields the extension read from Otari's entry for the model, and what Pi registered.
 4. **non-streaming completion**: one plain request outside Pi, so a rejection shows Otari's own reason, which Pi's client does not display.
 5. **streaming completion through Pi**: one prompt through Pi's agent loop, the extension's stream wrapper, and pi-ai's streaming client, with the model's output capped at the configured bound. Fails on an error reply, a truncated reply, more than one request for the prompt, or, with a reasoning level set, a reply without reasoning content.
