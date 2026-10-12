@@ -187,6 +187,31 @@ describe("discoverModels", () => {
     expect(JSON.stringify(error)).not.toContain("tk_secret");
   });
 
+  it("gives up when the model list's body stalls past the timeout", async () => {
+    // Like fetch, the body fails once the request's signal aborts.
+    const fetcher = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              init?.signal?.addEventListener("abort", () =>
+                controller.error(init.signal?.reason),
+              );
+            },
+          }),
+        ),
+    );
+
+    await expect(
+      discoverModels(
+        { ...base, discoveryTimeoutMs: 20 },
+        fetcher as typeof fetch,
+      ),
+    ).rejects.toMatchObject({
+      diagnostic: { code: "discovery-unavailable" },
+    });
+  });
+
   it("guides missing credentials to native login", async () => {
     const result = await discoverModels({ ...base, token: undefined });
     expect(result.models).toEqual([]);

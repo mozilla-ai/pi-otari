@@ -1,3 +1,4 @@
+import { type Fetcher, request } from "./http.js";
 import { parseStandardModelList } from "./model-mapper.js";
 import type {
   Diagnostic,
@@ -6,34 +7,10 @@ import type {
   OtariModel,
 } from "./types.js";
 
-type Fetcher = typeof fetch;
-
 export class DiscoveryUnavailableError extends Error {
   constructor(public readonly diagnostic: Diagnostic) {
     super(diagnostic.message);
     this.name = "DiscoveryUnavailableError";
-  }
-}
-
-async function request(
-  url: string,
-  token: string | undefined,
-  timeoutMs: number,
-  fetcher: Fetcher,
-): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const headers = new Headers({ accept: "application/json" });
-    if (token) headers.set("authorization", `Bearer ${token}`);
-    return await fetcher(url, {
-      method: "GET",
-      headers,
-      redirect: "error",
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -74,7 +51,7 @@ async function servesApiAt(
     const response = await request(
       `${baseUrl}/health`,
       undefined,
-      config.discoveryTimeoutMs,
+      AbortSignal.timeout(config.discoveryTimeoutMs),
       fetcher,
     );
     return response.ok;
@@ -130,16 +107,14 @@ export async function discoverModels(
 
   try {
     const discoveryUrl = `${config.baseUrl}/models`;
-    const response = await request(
-      discoveryUrl,
-      config.token,
-      config.discoveryTimeoutMs,
-      fetcher,
-    );
+    // One deadline for the headers and the body.
+    const signal = AbortSignal.timeout(config.discoveryTimeoutMs);
+    const response = await request(discoveryUrl, config.token, signal, fetcher);
     if (response.ok) {
       try {
         return successful(parseStandardModelList(await response.json()));
-      } catch {
+      } catch (error) {
+        if (signal.aborted) throw error;
         throw new DiscoveryUnavailableError({
           level: "warning",
           code: "discovery-invalid",
