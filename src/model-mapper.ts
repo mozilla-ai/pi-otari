@@ -22,7 +22,8 @@ const ZERO_COST: ModelCost = {
   cacheWrite: 0,
 };
 
-function record(value: unknown): Record<string, unknown> | undefined {
+/** The value as a plain object, or undefined when it is not one. */
+export function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
