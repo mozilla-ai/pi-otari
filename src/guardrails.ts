@@ -3,12 +3,15 @@ import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import type {
+  CustomMessageEntryDraft,
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
 const HOOK_TIMEOUT_MS = 20_000;
 const GUARDRAILS_ENTRY = "otari-guardrails";
+// Otari truncates the session's commands itself; this only bounds the payload.
+const MAX_RECORDED_COMMANDS = 200;
 const GUARDED_TOOLS = new Set(["bash", "read", "edit", "write"]);
 const CLAUDE_TOOL_NAMES: Record<string, string> = {
   bash: "Bash",
@@ -123,18 +126,38 @@ function runProcess(
   });
 }
 
-function systemMessageOf(stdout: string): string | undefined {
+function nonEmpty(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+/** The advisory for the user and the context for the model, if any. */
+function adviceOf(stdout: string): {
+  systemMessage?: string;
+  additionalContext?: string;
+} {
   try {
-    const parsed = JSON.parse(stdout) as { systemMessage?: unknown };
-    const message = parsed.systemMessage;
-    return typeof message === "string" && message.trim() ? message : undefined;
+    const parsed = JSON.parse(stdout) as {
+      systemMessage?: unknown;
+      hookSpecificOutput?: { additionalContext?: unknown };
+    };
+    return {
+      systemMessage: nonEmpty(parsed.systemMessage),
+      additionalContext: nonEmpty(parsed.hookSpecificOutput?.additionalContext),
+    };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
+const guardrailsMessage = (content: string): CustomMessageEntryDraft => ({
+  type: "custom_message",
+  customType: GUARDRAILS_ENTRY,
+  content,
+  display: true,
+});
+
 type Outcome =
-  | { kind: "allow"; systemMessage?: string }
+  | { kind: "allow"; systemMessage?: string; additionalContext?: string }
   | { kind: "block"; reason: string }
   | { kind: "skip" };
 
@@ -152,7 +175,6 @@ export function registerGuardrails(
 
   let bashCommands: string[] = [];
   let continued = false;
-  let skipNextAgentStart = false;
   let warnedFailure = false;
   const harnessCache = new Map<string, Promise<Harness>>();
 
@@ -189,7 +211,9 @@ export function registerGuardrails(
             /\s+/g,
             " ",
           );
-          const list = /--harness[^[]*\[([^\]]*)\]/.exec(text)?.[1] ?? "";
+          // Anchored on the option's own `--harness [a|b]` choice list, not
+          // the first mention of `--harness` in the help prose.
+          const list = /--harness \[([^\]]*)\]/.exec(text)?.[1] ?? "";
           return list.split(/[|,\s]+/).includes("pi") ? "pi" : "claude-code";
         })
         .catch((error) => {
@@ -258,7 +282,7 @@ export function registerGuardrails(
         signal,
       );
       if (result.code === 0) {
-        return { kind: "allow", systemMessage: systemMessageOf(result.stdout) };
+        return { kind: "allow", ...adviceOf(result.stdout) };
       }
       if (result.code === 2) {
         return {
@@ -270,6 +294,9 @@ export function registerGuardrails(
       failOpen(ctx, `otari hook exited with code ${result.code}`);
       return { kind: "skip" };
     } catch (error) {
+      // pi cancelled the operation (for example Esc): nothing is running, so
+      // there is nothing to allow and no failure to warn about.
+      if (ctx.signal?.aborted) return { kind: "skip" };
       failOpen(
         ctx,
         timeout.aborted
@@ -283,22 +310,11 @@ export function registerGuardrails(
   pi.on("session_start", () => {
     bashCommands = [];
     continued = false;
-    skipNextAgentStart = false;
   });
 
-  pi.on("input", () => {
-    continued = false;
-    skipNextAgentStart = false;
-    return undefined;
-  });
-
-  pi.on("agent_start", () => {
-    // A forced continuation may announce itself as another agent_start; it
-    // must not re-arm the loop guard.
-    if (skipNextAgentStart) {
-      skipNextAgentStart = false;
-      return;
-    }
+  // A forced continuation happens before the run settles, so a settled run
+  // is the point where the next run may be continued again.
+  pi.on("agent_settled", () => {
     continued = false;
   });
 
@@ -317,27 +333,36 @@ export function registerGuardrails(
     }
     if (event.toolName === "bash" && typeof input.command === "string") {
       bashCommands.push(input.command);
+      if (bashCommands.length > MAX_RECORDED_COMMANDS) {
+        bashCommands = bashCommands.slice(-MAX_RECORDED_COMMANDS);
+      }
     }
     return undefined;
   });
 
-  pi.on("agent_before_settle", async (_event, ctx) => {
+  pi.on("agent_before_settle", async (event, ctx) => {
+    // A run the user aborted or that errored is not a finished turn to
+    // check, and must never be resumed by a forced continuation.
+    if (event.outcome !== "completed") return undefined;
     const outcome = await invoke(ctx, "Stop", { stopHookActive: continued });
-    if (outcome.kind === "allow" && outcome.systemMessage) {
-      notify(ctx, outcome.systemMessage);
+    if (outcome.kind === "allow") {
+      if (outcome.systemMessage) notify(ctx, outcome.systemMessage);
+      if (!outcome.additionalContext) return undefined;
+      // Advisory feedback for the model (a failed judge gate): recorded for
+      // the next turn without forcing one.
+      return {
+        entries: [
+          ...event.entries,
+          guardrailsMessage(outcome.additionalContext),
+        ],
+      };
     }
     if (outcome.kind !== "block" || continued) return undefined;
+    if (!event.context.canContinue) return undefined;
     continued = true;
-    skipNextAgentStart = true;
+    // Earlier handlers' proposed entries are chained, never replaced.
     return {
-      entries: [
-        {
-          type: "custom_message" as const,
-          customType: GUARDRAILS_ENTRY,
-          content: outcome.reason,
-          display: true,
-        },
-      ],
+      entries: [...event.entries, guardrailsMessage(outcome.reason)],
       continue: true,
     };
   });

@@ -78,11 +78,31 @@ const toolCall = (toolName: string, input: Record<string, unknown>) =>
     { type: "tool_call", toolCallId: "1", toolName, input },
     ctx(),
   );
-const settle = () =>
+const settle = (
+  overrides: {
+    outcome?: string;
+    canContinue?: boolean;
+    entries?: unknown[];
+    signal?: AbortSignal;
+  } = {},
+) =>
   handlers.agent_before_settle(
-    { type: "agent_before_settle", entries: [], continue: false },
-    ctx(),
+    {
+      type: "agent_before_settle",
+      entries: overrides.entries ?? [],
+      continue: false,
+      outcome: overrides.outcome ?? "completed",
+      context: { canContinue: overrides.canContinue ?? true },
+    },
+    ctx(overrides.signal ? { signal: overrides.signal } : {}),
   ) as Promise<{ entries?: unknown[]; continue?: boolean } | undefined>;
+
+const guardrailsEntry = (content: string) => ({
+  type: "custom_message",
+  customType: "otari-guardrails",
+  content,
+  display: true,
+});
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "guardrails-"));
@@ -171,14 +191,7 @@ describe("guardrails", () => {
     await scenario({ code: 2, stderr: "run the tests" });
     const first = await settle();
     expect(first).toEqual({
-      entries: [
-        {
-          type: "custom_message",
-          customType: "otari-guardrails",
-          content: "run the tests",
-          display: true,
-        },
-      ],
+      entries: [guardrailsEntry("run the tests")],
       continue: true,
     });
     const second = await settle();
@@ -191,13 +204,82 @@ describe("guardrails", () => {
     expect(stops[0].payload.bash_commands).toEqual(["npm test"]);
     expect(stops[1].payload.stop_hook_active).toBe(true);
 
-    // A continuation's own agent_start does not re-arm the guard...
-    await first;
-    handlers.agent_start({ type: "agent_start" }, ctx());
-    expect(await settle()).toBeUndefined();
-    // ...but a new user prompt does.
-    handlers.input({ type: "input" }, ctx());
+    // Once the run settles, the next run may be continued again.
+    handlers.agent_settled({ type: "agent_settled" }, ctx());
     expect((await settle())?.continue).toBe(true);
+  });
+
+  it("chains its entry after entries earlier handlers proposed", async () => {
+    await scenario({ code: 2, stderr: "run the tests" });
+    const earlier = guardrailsEntry("from another extension");
+    expect(await settle({ entries: [earlier] })).toEqual({
+      entries: [earlier, guardrailsEntry("run the tests")],
+      continue: true,
+    });
+  });
+
+  it("never checks or resumes an aborted or failed run", async () => {
+    await scenario({ code: 2, stderr: "run the tests" });
+    expect(await settle({ outcome: "aborted" })).toBeUndefined();
+    expect(await settle({ outcome: "error" })).toBeUndefined();
+    expect(await calls()).toHaveLength(0);
+  });
+
+  it("does not continue when pi cannot continue", async () => {
+    await scenario({ code: 2, stderr: "run the tests" });
+    expect(await settle({ canContinue: false })).toBeUndefined();
+  });
+
+  it("records a judge gate's additionalContext without continuing", async () => {
+    await scenario({
+      stdout: JSON.stringify({
+        systemMessage: "judge: advisory",
+        hookSpecificOutput: { additionalContext: "consider adding tests" },
+      }),
+    });
+    const earlier = guardrailsEntry("from another extension");
+    expect(await settle({ entries: [earlier] })).toEqual({
+      entries: [earlier, guardrailsEntry("consider adding tests")],
+    });
+    expect(notify).toHaveBeenCalledWith("judge: advisory", "info");
+  });
+
+  it("detects pi support from the option list, not the help prose", async () => {
+    await scenario({
+      help: "  `--harness` picks the payload shape.\n  Options:\n  --url TEXT [env var: X]\n  --harness [claude-code|codex|pi]\n",
+    });
+    await toolCall("bash", { command: "ls" });
+    const [call] = await calls();
+    expect(call.args).toEqual(["hook", "--harness", "pi"]);
+  });
+
+  it("keeps a cancelled call from using up the failure warning", async () => {
+    await writeFile(bin, "#!/bin/sh\nsleep 5\n");
+    const controller = new AbortController();
+    const pending = handlers.tool_call(
+      {
+        type: "tool_call",
+        toolCallId: "1",
+        toolName: "bash",
+        input: { command: "ls" },
+      },
+      ctx({ signal: controller.signal }),
+    );
+    setTimeout(() => controller.abort(), 50);
+    expect(await pending).toBeUndefined();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("bounds the recorded bash commands", async () => {
+    // Without rules no hook runs, but commands are still recorded.
+    await rm(join(repo, ".otari"), { recursive: true });
+    for (let i = 0; i < 205; i++) await toolCall("bash", { command: `c${i}` });
+    await mkdir(join(repo, ".otari"));
+    await writeFile(join(repo, ".otari", "guardrails.yml"), "rules: []\n");
+    await settle();
+    const commands = (await calls()).at(-1)?.payload.bash_commands as string[];
+    expect(commands).toHaveLength(200);
+    expect(commands[0]).toBe("c5");
   });
 
   it("resets the recorded bash commands on session_start", async () => {
