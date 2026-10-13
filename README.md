@@ -143,7 +143,8 @@ Limits:
 Pi obeys the same Otari agent guardrails as Claude Code and Codex: the rules in `.otari/guardrails.yml` or `.otari/guardrails/*.yml` in your repository, and in `~/.otari/`. The extension does not interpret the rules. It shells out to the local `otari hook` CLI before each `bash`, `read`, `edit` and `write` tool call, and again when the agent is about to stop.
 
 - A blocked tool call is refused, and the model sees the reason from `otari`.
-- When a stop check fails, the extension adds the reason to the session and asks the model to continue once. It never forces a second continuation in a row; a new prompt resets this.
+- When a stop check fails at the end of a completed run, the extension adds the reason to the session and asks the model to continue once. It never forces a second continuation in the same run, and it never resumes a run you aborted or that ended in an error.
+- Advisory feedback meant for the model, such as a failed `judge` gate, is added to the session without forcing a continuation.
 - An advisory `systemMessage` from `otari` is shown as a notification.
 
 Guardrails are active only when the `otari` binary is on `PATH` (or set `OTARI_HOOK_BIN`) and a guardrails file exists, searching from the working directory up to the git root and then `~/.otari/`. Set `OTARI_GUARDRAILS=off` to disable them. If `otari` cannot be run, times out after about 20 seconds or exits unexpectedly, the action is allowed and you get a single warning.

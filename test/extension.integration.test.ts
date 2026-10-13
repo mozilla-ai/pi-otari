@@ -14,7 +14,7 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createOtariExtension } from "../src/index.js";
 
 async function body(
@@ -49,6 +49,9 @@ function toolChunk(
 }
 
 describe("Pi–Otari integration", () => {
+  // These runs use the real environment; keep a developer's own `otari` and
+  // `~/.otari` rules out of them.
+  beforeEach(() => vi.stubEnv("OTARI_GUARDRAILS", "off"));
   afterEach(() => vi.unstubAllEnvs());
 
   it("preserves the selected reasoning level and reports a rejected level without retrying", async () => {
