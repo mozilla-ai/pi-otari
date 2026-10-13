@@ -138,6 +138,18 @@ Limits:
 - Otari is asked when the message ends, before Pi checks each tool call. A launch that Pi or another extension then blocks has already been sent to Otari.
 - The recommended model counts as an explicit model in pi-subagents, so it wins over an agent's own `model:`. An enforced `subagents.modelScope` can still refuse it.
 
+## Guardrails
+
+Pi obeys the same Otari agent guardrails as Claude Code and Codex: the rules in `.otari/guardrails.yml` or `.otari/guardrails/*.yml` in your repository, and in `~/.otari/`. The extension does not interpret the rules. It shells out to the local `otari hook` CLI before each `bash`, `read`, `edit` and `write` tool call, and again when the agent is about to stop.
+
+- A blocked tool call is refused, and the model sees the reason from `otari`.
+- When a stop check fails, the extension adds the reason to the session and asks the model to continue once. It never forces a second continuation in a row; a new prompt resets this.
+- An advisory `systemMessage` from `otari` is shown as a notification.
+
+Guardrails are active only when the `otari` binary is on `PATH` (or set `OTARI_HOOK_BIN`) and a guardrails file exists, searching from the working directory up to the git root and then `~/.otari/`. Set `OTARI_GUARDRAILS=off` to disable them. If `otari` cannot be run, times out after about 20 seconds or exits unexpectedly, the action is allowed and you get a single warning.
+
+Install an `otari` release with `--harness pi` support for full fidelity, including the commands Pi ran in the session. With an older `otari`, the extension detects the missing support once and sends Claude Code-shaped payloads instead, without the session's command list on stop checks.
+
 ## Non-interactive authentication
 
 For CI, containers, and other noninteractive environments, provide the API key through `OTARI_API_KEY`:
@@ -171,6 +183,8 @@ HTTP is accepted only for loopback development endpoints.
 | `OTARI_MODELS` | none | Conditional fallback or additional model selectors |
 | `OTARI_WEB_SEARCH` | `on` | Declare Otari's gateway-run web search tool on Otari requests; `off` disables it |
 | `OTARI_WEB_FETCH` | `on` | Declare Otari's gateway-run web fetch tool on Otari requests; `off` disables it |
+| `OTARI_GUARDRAILS` | on | `off` disables [guardrails](#guardrails) enforcement |
+| `OTARI_HOOK_BIN` | `otari` on `PATH` | Path to the `otari` binary used for guardrails |
 
 ## Privacy and security
 

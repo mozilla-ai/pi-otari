@@ -5,6 +5,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ConfigError, loadOtariConfig } from "./config.js";
 import { GATEWAY_TOOLS, GatewayToolState } from "./gateway-tools.js";
+import { registerGuardrails } from "./guardrails.js";
 import type { Catalog } from "./staleness.js";
 import { registerLifecycleUI } from "./status.js";
 import type { OtariConfig, RuntimeState } from "./types.js";
@@ -49,6 +50,11 @@ export function createOtariExtension(
     const ui = registerLifecycleUI(pi, () => state, catalog, gatewayTools);
 
     const piVersion = dependencies.piVersion ?? VERSION;
+    // Guardrails do not depend on Otari model routing, so they are registered
+    // before the config checks below can return early.
+    if (isAtLeast(piVersion, ROUTING_PI_VERSION)) {
+      registerGuardrails(pi, { env: dependencies.env });
+    }
     if (!isAtLeast(piVersion, MINIMUM_PI_VERSION)) {
       state = {
         models: [],
