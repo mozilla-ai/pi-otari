@@ -7,6 +7,7 @@ import { ConfigError, loadOtariConfig } from "./config.js";
 import type { Catalog } from "./staleness.js";
 import { registerLifecycleUI } from "./status.js";
 import type { OtariConfig, RuntimeState } from "./types.js";
+import { WebSearchState } from "./web-search.js";
 
 const MINIMUM_PI_VERSION = [0, 81, 0] as const;
 // Subagent routing reads its settings with pi.getSettings(), added in 0.99.0.
@@ -40,7 +41,10 @@ export function createOtariExtension(
       discoverySource: "none",
     };
     const catalog: Catalog = new Set();
-    const ui = registerLifecycleUI(pi, () => state, catalog);
+    // Created before any config check so the status line and the provider share
+    // one answer to "does this deployment run web search for us".
+    const webSearch = new WebSearchState(() => ui.refreshStatus());
+    const ui = registerLifecycleUI(pi, () => state, catalog, webSearch);
 
     const piVersion = dependencies.piVersion ?? VERSION;
     if (!isAtLeast(piVersion, MINIMUM_PI_VERSION)) {
@@ -90,6 +94,7 @@ export function createOtariExtension(
       fetch: dependencies.fetch ?? fetch,
       onDiagnostic: (diagnostic) => ui.reportDiagnostic(diagnostic),
       catalog,
+      webSearch,
     });
     routing?.registerSubagentRouting(pi, config, {
       fetch: dependencies.fetch ?? fetch,

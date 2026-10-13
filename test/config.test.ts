@@ -44,6 +44,16 @@ describe("loadOtariConfig", () => {
     ).toThrow(ConfigError);
   });
 
+  it("declares web search by default and parses the opt-out", () => {
+    expect(loadOtariConfig({}).webSearch).toBe(true);
+    expect(loadOtariConfig({ OTARI_WEB_SEARCH: "off" }).webSearch).toBe(false);
+    expect(loadOtariConfig({ OTARI_WEB_SEARCH: "0" }).webSearch).toBe(false);
+    expect(loadOtariConfig({ OTARI_WEB_SEARCH: " on " }).webSearch).toBe(true);
+    expect(() => loadOtariConfig({ OTARI_WEB_SEARCH: "maybe" })).toThrow(
+      ConfigError,
+    );
+  });
+
   it.each([
     "https://otari.example.com",
     "https://otari.example.com/",

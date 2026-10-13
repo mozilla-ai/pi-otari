@@ -12,6 +12,7 @@ const config: OtariConfig = {
   discoveryTimeoutMs: 5000,
   environmentModels: [],
   officialHosted: false,
+  webSearch: true,
 };
 
 const KNOWN = [
