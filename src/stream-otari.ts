@@ -72,6 +72,31 @@ export function explainGatewayError(
   ].join("\n\n");
 }
 
+const CONVERSATION_ID_HEADER = "Otari-Conversation-Id";
+
+/**
+ * Pi's session id, sent as `Otari-Conversation-Id` so the gateway groups a
+ * session's requests into one trace instead of one trace per request. A
+ * header the caller set explicitly wins, in any letter case.
+ */
+export function withConversationId(
+  options?: SimpleStreamOptions,
+): SimpleStreamOptions | undefined {
+  if (!options?.sessionId) return options;
+  const name = CONVERSATION_ID_HEADER.toLowerCase();
+  if (
+    Object.keys(options.headers ?? {}).some((key) => key.toLowerCase() === name)
+  )
+    return options;
+  return {
+    ...options,
+    headers: {
+      ...options.headers,
+      [CONVERSATION_ID_HEADER]: options.sessionId,
+    },
+  };
+}
+
 /**
  * `wrapFetch`, when given, decorates the fetch Pi's OpenAI client uses for
  * each request; the provider uses it to declare Otari's web search tool.
@@ -96,7 +121,7 @@ export function createStreamOtari(
         const attempt = openAICompletionsApi().streamSimple(
           openAIModel,
           context,
-          streamOptions,
+          withConversationId(streamOptions),
         );
         for await (const event of attempt) {
           if (event.type !== "error") {

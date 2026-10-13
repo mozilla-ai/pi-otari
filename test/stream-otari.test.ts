@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { explainGatewayError } from "../src/stream-otari.js";
+import {
+  explainGatewayError,
+  withConversationId,
+} from "../src/stream-otari.js";
 
 describe("explainGatewayError", () => {
   it("describes a selector missing from the discovered list and keeps the gateway text", () => {
@@ -39,5 +42,40 @@ describe("explainGatewayError", () => {
         new Set(),
       ),
     ).toBeUndefined();
+  });
+});
+
+describe("withConversationId", () => {
+  it("sends Pi's session id as Otari-Conversation-Id", () => {
+    const options = withConversationId({
+      sessionId: "s-1",
+      headers: { a: "b" },
+    });
+    expect(options?.headers).toEqual({
+      "Otari-Conversation-Id": "s-1",
+      a: "b",
+    });
+  });
+
+  it("lets a header the caller set win", () => {
+    const options = withConversationId({
+      sessionId: "s-1",
+      headers: { "Otari-Conversation-Id": "mine" },
+    });
+    expect(options?.headers?.["Otari-Conversation-Id"]).toBe("mine");
+  });
+
+  it("does not add a second header when the caller's differs in case", () => {
+    const options = {
+      sessionId: "s-1",
+      headers: { "otari-conversation-id": "mine" },
+    };
+    expect(withConversationId(options)).toBe(options);
+  });
+
+  it("leaves options without a session id untouched", () => {
+    const options = { headers: { a: "b" } };
+    expect(withConversationId(options)).toBe(options);
+    expect(withConversationId(undefined)).toBeUndefined();
   });
 });
