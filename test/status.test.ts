@@ -1,9 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
+import {
+  GatewayToolState,
+  WEB_FETCH,
+  WEB_SEARCH,
+} from "../src/gateway-tools.js";
 import type { Catalog } from "../src/staleness.js";
 import { registerLifecycleUI } from "../src/status.js";
 import type { OtariConfig, RuntimeState } from "../src/types.js";
-import { WebSearchState } from "../src/web-search.js";
 
 const config: OtariConfig = {
   baseUrl: "https://api.otari.ai/api/v1",
@@ -11,12 +15,13 @@ const config: OtariConfig = {
   environmentModels: [],
   officialHosted: true,
   webSearch: true,
+  webFetch: true,
 };
 
 function harness(
   state: RuntimeState,
   catalog: Catalog = new Set(),
-  webSearch?: WebSearchState,
+  gatewayTools: GatewayToolState[] = [],
 ) {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const pi = {
@@ -24,7 +29,7 @@ function harness(
       handlers.set(name, handler),
     ),
   } as unknown as ExtensionAPI;
-  const ui = registerLifecycleUI(pi, () => state, catalog, webSearch);
+  const ui = registerLifecycleUI(pi, () => state, catalog, gatewayTools);
   return { handlers, ui };
 }
 
@@ -71,12 +76,12 @@ describe("lifecycle UI", () => {
   });
 
   it("names web search in the status only while the deployment offers it", async () => {
-    const webSearch = new WebSearchState();
+    const webSearch = new GatewayToolState(WEB_SEARCH);
     webSearch.probed("available");
     const { handlers } = harness(
       { models: [], diagnostics: [], discoverySource: "none" },
       new Set(),
-      webSearch,
+      [webSearch],
     );
     const ctx = context();
     const select = () =>
@@ -103,13 +108,42 @@ describe("lifecycle UI", () => {
     );
   });
 
+  it("names every offered gateway tool, in declaration order", async () => {
+    const webSearch = new GatewayToolState(WEB_SEARCH);
+    const webFetch = new GatewayToolState(WEB_FETCH);
+    webSearch.probed("available");
+    webFetch.probed("available");
+    const { handlers } = harness(
+      { models: [], diagnostics: [], discoverySource: "none" },
+      new Set(),
+      [webSearch, webFetch],
+    );
+    const ctx = context();
+    const select = () =>
+      handlers.get("model_select")?.(
+        { model: { provider: "otari", id: "anthropic:claude" } },
+        ctx,
+      );
+    await select();
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+      "pi-otari",
+      "Otari → anthropic:claude · web search · web fetch",
+    );
+    webSearch.refuse("no backend");
+    await select();
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith(
+      "pi-otari",
+      "Otari → anthropic:claude · web fetch",
+    );
+  });
+
   it("redraws the status when web search state changes between events", async () => {
     let refresh = () => {};
-    const webSearch = new WebSearchState(() => refresh());
+    const webSearch = new GatewayToolState(WEB_SEARCH, () => refresh());
     const { handlers, ui } = harness(
       { models: [], diagnostics: [], discoverySource: "none" },
       new Set(),
-      webSearch,
+      [webSearch],
     );
     refresh = () => ui.refreshStatus();
     const ctx = context();

@@ -28,12 +28,12 @@ function parseTimeout(value: string | undefined): number {
   return timeout;
 }
 
-function parseWebSearch(value: string | undefined): boolean {
+function parseSwitch(name: string, value: string | undefined): boolean {
   if (value === undefined || value.trim() === "") return true;
   const normalized = value.trim().toLowerCase();
   if (["off", "0", "false", "no"].includes(normalized)) return false;
   if (["on", "1", "true", "yes"].includes(normalized)) return true;
-  throw new ConfigError("OTARI_WEB_SEARCH must be on or off");
+  throw new ConfigError(`${name} must be on or off`);
 }
 
 function parseModels(value: string | undefined): string[] {
@@ -107,6 +107,7 @@ export function loadOtariConfig(
     discoveryTimeoutMs: parseTimeout(env.OTARI_DISCOVERY_TIMEOUT_MS),
     environmentModels: parseModels(env.OTARI_MODELS),
     officialHosted,
-    webSearch: parseWebSearch(env.OTARI_WEB_SEARCH),
+    webSearch: parseSwitch("OTARI_WEB_SEARCH", env.OTARI_WEB_SEARCH),
+    webFetch: parseSwitch("OTARI_WEB_FETCH", env.OTARI_WEB_FETCH),
   };
 }

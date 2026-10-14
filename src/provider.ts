@@ -7,6 +7,12 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DiscoveryUnavailableError, discoverModels } from "./discovery.js";
 import {
+  GATEWAY_TOOLS,
+  GatewayToolState,
+  probeGatewayTools,
+  wrapFetchWithGatewayTools,
+} from "./gateway-tools.js";
+import {
   selectorsToModels,
   THINKING_LEVEL_MAP,
   toProviderModel,
@@ -19,11 +25,6 @@ import {
 } from "./staleness.js";
 import { createStreamOtari } from "./stream-otari.js";
 import type { Diagnostic, OtariConfig, OtariModel } from "./types.js";
-import {
-  probeWebSearch,
-  WebSearchState,
-  wrapFetchWithWebSearch,
-} from "./web-search.js";
 
 function toRuntimeModel(
   model: OtariModel,
@@ -83,8 +84,11 @@ export interface ProviderDependencies {
   onDiagnostic?: (diagnostic: Diagnostic) => void;
   /** Kept in step with each discovery; see staleness.ts. */
   catalog?: Catalog;
-  /** Shared with the request path; each successful discovery refreshes it. */
-  webSearch?: WebSearchState;
+  /**
+   * Shared with the request path; each successful discovery refreshes the
+   * ones the config enables.
+   */
+  gatewayTools?: readonly GatewayToolState[];
 }
 
 export function registerOtariProvider(
@@ -102,7 +106,10 @@ export function registerOtariProvider(
     ).values(),
   ];
   const catalog = dependencies.catalog ?? new Set<string>();
-  const webSearch = dependencies.webSearch ?? new WebSearchState();
+  const gatewayTools = (
+    dependencies.gatewayTools ??
+    GATEWAY_TOOLS.map((tool) => new GatewayToolState(tool))
+  ).filter((state) => config[state.tool.configKey]);
   const reported = new Set<string>();
   // OTARI_MODELS entries stay registered as given, since they may name models
   // discovery does not list. Once Otari has answered, tell the user about the
@@ -135,11 +142,12 @@ export function registerOtariProvider(
       const token = storedToken ?? config.token;
       const fetcher = dependencies.fetch ?? fetch;
       // Probe alongside discovery so a slow /tools never adds its own timeout
-      // to the refresh. probeWebSearch never rejects; its answer is only
+      // to the refresh. probeGatewayTools never rejects; its answer is only
       // applied once discovery has succeeded.
-      const probe = config.webSearch
-        ? probeWebSearch(config, token, fetcher)
-        : undefined;
+      const probe =
+        gatewayTools.length > 0
+          ? probeGatewayTools(config, token, fetcher)
+          : undefined;
       try {
         const result = await discoverModels(
           { ...config, token, environmentModels: [] },
@@ -150,7 +158,11 @@ export function registerOtariProvider(
         catalog.clear();
         for (const model of result.models) catalog.add(model.id);
         reportStaleSelectors();
-        if (probe) webSearch.probed(await probe);
+        if (probe) {
+          const availability = await probe;
+          for (const state of gatewayTools)
+            state.probed(availability(state.tool.id));
+        }
         return result.models.map((model) =>
           toRuntimeModel(model, config.baseUrl),
         );
@@ -164,16 +176,16 @@ export function registerOtariProvider(
       ...streams,
       streamSimple: createStreamOtari(
         catalog,
-        config.webSearch
+        gatewayTools.length > 0
           ? (inner) =>
-              wrapFetchWithWebSearch(inner, {
+              wrapFetchWithGatewayTools(inner, {
                 baseUrl: config.baseUrl,
-                state: webSearch,
-                onRefused: (reason) =>
+                tools: gatewayTools,
+                onRefused: (tool, reason) =>
                   dependencies.onDiagnostic?.({
                     level: "warning",
-                    code: "web-search-refused",
-                    message: `Otari refused its web search tool: ${reason.replace(/\.?$/, ".")} The request was retried without web search, which stays off until the next model refresh. Set OTARI_WEB_SEARCH=off to stop declaring it.`,
+                    code: `${tool.id.replace(/^otari_/, "").replaceAll("_", "-")}-refused`,
+                    message: `Otari refused its ${tool.label} tool: ${reason.replace(/\.?$/, ".")} The request was retried without ${tool.label}, which stays off until the next model refresh. Set ${tool.setting}=off to stop declaring it.`,
                   }),
               })
           : undefined,

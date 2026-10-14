@@ -54,6 +54,15 @@ describe("loadOtariConfig", () => {
     );
   });
 
+  it("declares web fetch by default and parses the opt-out", () => {
+    expect(loadOtariConfig({}).webFetch).toBe(true);
+    expect(loadOtariConfig({ OTARI_WEB_FETCH: "off" }).webFetch).toBe(false);
+    expect(loadOtariConfig({ OTARI_WEB_FETCH: "yes" }).webFetch).toBe(true);
+    expect(() => loadOtariConfig({ OTARI_WEB_FETCH: "maybe" })).toThrow(
+      "OTARI_WEB_FETCH must be on or off",
+    );
+  });
+
   it.each([
     "https://otari.example.com",
     "https://otari.example.com/",

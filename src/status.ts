@@ -2,6 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import type { GatewayToolState } from "./gateway-tools.js";
 import {
   type Catalog,
   describeStale,
@@ -9,7 +10,6 @@ import {
   replacementsFor,
 } from "./staleness.js";
 import type { Diagnostic, RuntimeState } from "./types.js";
-import type { WebSearchState } from "./web-search.js";
 
 export interface LifecycleUI {
   /**
@@ -20,7 +20,7 @@ export interface LifecycleUI {
   reportDiagnostic(diagnostic: Diagnostic): void;
   /**
    * Redraw the status line for the last selected model, for changes that
-   * arrive between session events (a web search probe or refusal).
+   * arrive between session events (a tools probe or refusal).
    */
   refreshStatus(): void;
 }
@@ -29,14 +29,15 @@ function updateStatus(
   ctx: ExtensionContext,
   provider: string | undefined,
   id: string | undefined,
-  webSearch?: WebSearchState,
+  gatewayTools: readonly GatewayToolState[] = [],
 ): void {
-  const searching = webSearch?.offered ?? false;
+  const offered = gatewayTools
+    .filter((state) => state.offered)
+    .map((state) => ` · ${state.tool.label}`)
+    .join("");
   ctx.ui.setStatus(
     "pi-otari",
-    provider === "otari" && id
-      ? `Otari → ${id}${searching ? " · web search" : ""}`
-      : undefined,
+    provider === "otari" && id ? `Otari → ${id}${offered}` : undefined,
   );
 }
 
@@ -54,7 +55,7 @@ export function registerLifecycleUI(
   pi: ExtensionAPI,
   getState: () => RuntimeState,
   catalog: Catalog,
-  webSearch?: WebSearchState,
+  gatewayTools: readonly GatewayToolState[] = [],
 ): LifecycleUI {
   let ui: ExtensionContext["ui"] | undefined;
   let shown:
@@ -69,7 +70,7 @@ export function registerLifecycleUI(
     id: string | undefined,
   ) => {
     shown = { ctx, provider, id };
-    updateStatus(ctx, provider, id, webSearch);
+    updateStatus(ctx, provider, id, gatewayTools);
   };
 
   // Discovery is the authority on what Otari routes. Warn user when the
@@ -122,7 +123,8 @@ export function registerLifecycleUI(
       ui?.notify(diagnostic.message, diagnostic.level);
     },
     refreshStatus() {
-      if (shown) updateStatus(shown.ctx, shown.provider, shown.id, webSearch);
+      if (shown)
+        updateStatus(shown.ctx, shown.provider, shown.id, gatewayTools);
     },
   };
 }
