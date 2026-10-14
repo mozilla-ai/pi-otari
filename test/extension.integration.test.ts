@@ -123,9 +123,10 @@ describe("Pi–Otari integration", () => {
           completionPayload?.messages as Array<{ role: string }> | undefined
         )?.[0]?.role,
       ).toBe("system");
-      // Pi does not retry the turn. The second request is the extension's
-      // one check per refresh that the error is not about web search.
-      expect(completionCount).toBe(2);
+      // Pi does not retry the turn. The other two requests are the
+      // extension's one check per refresh that the error is not about its
+      // web fetch or web search declaration.
+      expect(completionCount).toBe(3);
       expect(session.state.messages.at(-1)).toMatchObject({
         role: "assistant",
         stopReason: "error",
@@ -203,9 +204,9 @@ describe("Pi–Otari integration", () => {
 
       // Pi retries a turn whose error text looks transient, so the
       // explanation must not read as one (it carries no URL or port). The
-      // second request is the extension's one check per refresh that the
-      // error is not about web search.
-      expect(completionCount).toBe(2);
+      // other two requests are the extension's one check per refresh that the
+      // error is not about its web fetch or web search declaration.
+      expect(completionCount).toBe(3);
       const last = session.state.messages.at(-1) as {
         stopReason?: string;
         errorMessage?: string;
@@ -464,7 +465,7 @@ describe("Pi–Otari integration", () => {
     }
   });
 
-  it("declares Otari's web search tool on completions when the gateway offers it", async () => {
+  it("declares Otari's web tools on completions when the gateway offers them", async () => {
     let completionPayload: Record<string, unknown> | undefined;
     const server = createServer(async (request, response) => {
       expect(request.headers.authorization).toBe("Bearer tk_integration");
@@ -477,7 +478,10 @@ describe("Pi–Otari integration", () => {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(
           JSON.stringify({
-            data: [{ id: "otari_web_search", available: true }],
+            data: [
+              { id: "otari_web_search", available: true },
+              { id: "otari_web_fetch", available: true },
+            ],
           }),
         );
         return;
@@ -525,9 +529,12 @@ describe("Pi–Otari integration", () => {
       await session.setModel(model);
       await session.prompt("Reply with done.");
 
-      // Pi's own function tools stay declared; the gateway's tool is appended.
+      // Pi's own function tools stay declared; the gateway's are appended.
       expect(completionPayload?.tools).toEqual(
-        expect.arrayContaining([{ type: "otari_web_search" }]),
+        expect.arrayContaining([
+          { type: "otari_web_search" },
+          { type: "otari_web_fetch" },
+        ]),
       );
       const tools = completionPayload?.tools as Array<{ type: string }>;
       expect(tools.some((tool) => tool.type === "function")).toBe(true);
@@ -620,6 +627,90 @@ describe("Pi–Otari integration", () => {
       expect(JSON.stringify(completionTools[1])).not.toContain(
         "otari_web_search",
       );
+      expect(session.state.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        stopReason: "stop",
+      });
+    } finally {
+      session.dispose();
+      server.close();
+      await once(server, "close");
+    }
+  });
+
+  it("keeps web search when a gateway without a tools catalog refuses only web fetch", async () => {
+    const completionTools: unknown[] = [];
+    const server = createServer(async (request, response) => {
+      if (request.method === "GET" && request.url === "/api/v1/models") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "test-model" }] }));
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        request.url === "/api/v1/chat/completions"
+      ) {
+        const tools = (await body(request)).tools;
+        completionTools.push(tools);
+        if (JSON.stringify(tools).includes("otari_web_fetch")) {
+          response.writeHead(403, { "content-type": "application/json" });
+          response.end(
+            JSON.stringify({
+              detail: "web fetch is not authorized for this workspace",
+            }),
+          );
+          return;
+        }
+        sse(response, [
+          toolChunk({ role: "assistant", content: "done" }),
+          toolChunk({}, "stop"),
+        ]);
+        return;
+      }
+      // Like a hybrid gateway, this one serves no GET /tools.
+      response.writeHead(404).end();
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Expected TCP server");
+
+    vi.stubEnv("OTARI_API_KEY", "tk_integration");
+    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/api/v1`);
+    const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-fetch-"));
+    const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir,
+      extensionFactories: [createOtariExtension()],
+    });
+    await resourceLoader.reload();
+    const { session } = await createAgentSession({
+      cwd,
+      agentDir,
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(cwd),
+    });
+    try {
+      await session.modelRuntime.refresh({ allowNetwork: true });
+      const model = session.modelRuntime.getModel("otari", "test-model");
+      expect(model).toBeDefined();
+      if (!model) throw new Error("Expected Otari model");
+      await session.setModel(model);
+      await session.prompt("Reply with done.");
+      await session.prompt("Reply with done again.");
+
+      // The first prompt is retried once without fetch; the second never
+      // declares it, and search stays declared throughout.
+      expect(completionTools.length).toBe(3);
+      expect(JSON.stringify(completionTools[0])).toContain("otari_web_fetch");
+      for (const tools of completionTools.slice(1)) {
+        expect(JSON.stringify(tools)).not.toContain("otari_web_fetch");
+        expect(tools).toEqual(
+          expect.arrayContaining([{ type: "otari_web_search" }]),
+        );
+      }
       expect(session.state.messages.at(-1)).toMatchObject({
         role: "assistant",
         stopReason: "stop",

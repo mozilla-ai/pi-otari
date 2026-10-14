@@ -2,9 +2,9 @@ import type { Model, Provider } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { loadOtariConfig } from "../src/config.js";
+import { GatewayToolState, WEB_SEARCH } from "../src/gateway-tools.js";
 import { registerOtariProvider } from "../src/provider.js";
 import type { OtariConfig } from "../src/types.js";
-import { WebSearchState } from "../src/web-search.js";
 
 const config: OtariConfig = {
   baseUrl: "https://api.otari.ai/api/v1",
@@ -13,6 +13,7 @@ const config: OtariConfig = {
   environmentModels: [],
   officialHosted: true,
   webSearch: true,
+  webFetch: true,
 };
 
 /** A tools catalog with nothing to offer: discovery probes it after /models. */
@@ -183,7 +184,7 @@ describe("registerOtariProvider", () => {
       }),
     );
 
-    // /models, then the web-search capability probe against /tools.
+    // /models, then the gateway tools probe against /tools.
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(storedModels).toEqual([
       expect.objectContaining({ id: "mzai:stored-model" }),
@@ -366,7 +367,7 @@ describe("registerOtariProvider", () => {
         }),
       ),
     ).rejects.toThrow();
-    // /models, plus the web search probe that runs alongside it.
+    // /models, plus the gateway tools probe that runs alongside it.
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(persisted).toBe("untouched");
     expect(provider.getModels()).toEqual([
@@ -487,7 +488,7 @@ describe("registerOtariProvider", () => {
   });
 
   it("marks web search available when the tools catalog lists it, clearing a refusal", async () => {
-    const webSearch = new WebSearchState();
+    const webSearch = new GatewayToolState(WEB_SEARCH);
     webSearch.refuse("earlier refusal");
     const fetcher = vi.fn(
       async (url: string | URL | Request, init?: RequestInit) => {
@@ -511,7 +512,7 @@ describe("registerOtariProvider", () => {
     const pi = fakePi();
     registerOtariProvider(pi, config, [], {
       fetch: fetcher as typeof fetch,
-      webSearch,
+      gatewayTools: [webSearch],
     });
     await registeredProvider(pi).refreshModels?.(
       refreshContext({ credential: { type: "api_key", key: "tk_stored" } }),
@@ -527,12 +528,12 @@ describe("registerOtariProvider", () => {
             status: 200,
           }),
     );
-    const webSearch = new WebSearchState();
+    const webSearch = new GatewayToolState(WEB_SEARCH);
     webSearch.refuse("earlier refusal");
     const pi = fakePi();
     registerOtariProvider(pi, config, [], {
       fetch: fetcher as typeof fetch,
-      webSearch,
+      gatewayTools: [webSearch],
     });
     await registeredProvider(pi).refreshModels?.(refreshContext());
     expect([webSearch.active, webSearch.offered]).toEqual([true, false]);
@@ -557,19 +558,24 @@ describe("registerOtariProvider", () => {
     await refresh;
   });
 
-  it("skips the tools probe when web search is configured off", async () => {
+  it("skips the tools probe when every gateway tool is configured off", async () => {
     const fetcher = vi.fn(
       async (_url: string | URL | Request) =>
         new Response(JSON.stringify({ data: [{ id: "mzai:model" }] }), {
           status: 200,
         }),
     );
-    const webSearch = new WebSearchState();
+    const webSearch = new GatewayToolState(WEB_SEARCH);
     const pi = fakePi();
-    registerOtariProvider(pi, { ...config, webSearch: false }, [], {
-      fetch: fetcher as typeof fetch,
-      webSearch,
-    });
+    registerOtariProvider(
+      pi,
+      { ...config, webSearch: false, webFetch: false },
+      [],
+      {
+        fetch: fetcher as typeof fetch,
+        gatewayTools: [webSearch],
+      },
+    );
     await registeredProvider(pi).refreshModels?.(refreshContext());
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(String(vi.mocked(fetcher).mock.calls[0][0])).toBe(
@@ -580,12 +586,12 @@ describe("registerOtariProvider", () => {
 
   it("leaves web search state untouched when discovery fails", async () => {
     const fetcher = vi.fn(async () => new Response("{}", { status: 500 }));
-    const webSearch = new WebSearchState();
+    const webSearch = new GatewayToolState(WEB_SEARCH);
     webSearch.probed("available");
     const pi = fakePi();
     registerOtariProvider(pi, config, [], {
       fetch: fetcher as typeof fetch,
-      webSearch,
+      gatewayTools: [webSearch],
     });
     await expect(
       registeredProvider(pi).refreshModels?.(refreshContext()),

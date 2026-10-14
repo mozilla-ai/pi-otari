@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import type { OtariConfig } from "../src/types.js";
 import {
-  probeWebSearch,
+  GatewayToolState,
+  probeGatewayTools,
   rejectionReason,
-  WebSearchState,
-  wrapFetchWithWebSearch,
-} from "../src/web-search.js";
+  WEB_FETCH,
+  WEB_SEARCH,
+  wrapFetchWithGatewayTools,
+} from "../src/gateway-tools.js";
+import type { OtariConfig } from "../src/types.js";
 
 const BASE_URL = "https://api.otari.ai/api/v1";
 const COMPLETIONS_URL = `${BASE_URL}/chat/completions`;
@@ -17,6 +19,7 @@ const config: OtariConfig = {
   environmentModels: [],
   officialHosted: true,
   webSearch: true,
+  webFetch: true,
 };
 
 const json = (status: number, body: unknown): Response =>
@@ -37,10 +40,11 @@ const completionInit = (body: unknown): RequestInit => ({
 const ok = () => json(200, { ok: true });
 
 const SEARCH_REFUSAL = "web search is not enabled for this workspace";
+const FETCH_REFUSAL = "web fetch is not authorized for this workspace";
 
-describe("WebSearchState", () => {
+describe("GatewayToolState", () => {
   it("is active while unknown or available, offered only when available", () => {
-    const state = new WebSearchState();
+    const state = new GatewayToolState(WEB_SEARCH);
     expect([state.active, state.offered]).toEqual([true, false]);
     state.probed("available");
     expect([state.active, state.offered]).toEqual([true, true]);
@@ -50,7 +54,7 @@ describe("WebSearchState", () => {
 
   it("holds a refusal until the next probe, whatever it answers", () => {
     const onChange = vi.fn();
-    const state = new WebSearchState(onChange);
+    const state = new GatewayToolState(WEB_SEARCH, onChange);
     state.probed("available");
     state.refuse("no backend");
     expect([state.active, state.offered]).toEqual([false, false]);
@@ -61,7 +65,7 @@ describe("WebSearchState", () => {
 
   it("reports each refusal reason once", () => {
     const onChange = vi.fn();
-    const state = new WebSearchState(onChange);
+    const state = new GatewayToolState(WEB_SEARCH, onChange);
     expect(state.refuse("no backend")).toBe(true);
     expect(state.refuse("no backend")).toBe(false);
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -71,8 +75,8 @@ describe("WebSearchState", () => {
   });
 });
 
-describe("probeWebSearch", () => {
-  it("reports available when the catalog lists otari_web_search as available", async () => {
+describe("probeGatewayTools", () => {
+  it("reports each tool as the catalog lists it", async () => {
     const fetcher = vi.fn(
       async (url: string | URL | Request, init?: RequestInit) => {
         expect(String(url)).toBe(`${BASE_URL}/tools`);
@@ -86,31 +90,44 @@ describe("probeWebSearch", () => {
         ]);
       },
     );
-    expect(
-      await probeWebSearch(config, "tk_test", fetcher as typeof fetch),
-    ).toBe("available");
+    const availability = await probeGatewayTools(
+      config,
+      "tk_test",
+      fetcher as typeof fetch,
+    );
+    expect(availability(WEB_SEARCH.id)).toBe("available");
+    expect(availability(WEB_FETCH.id)).toBe("unavailable");
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("reports unavailable when the tool is missing or not available", async () => {
     const missing = vi.fn(async () => toolsCatalog([]));
     expect(
-      await probeWebSearch(config, "tk_test", missing as typeof fetch),
+      (await probeGatewayTools(config, "tk_test", missing as typeof fetch))(
+        WEB_FETCH.id,
+      ),
     ).toBe("unavailable");
     const off = vi.fn(async () =>
       toolsCatalog([{ id: "otari_web_search", available: false }]),
     );
-    expect(await probeWebSearch(config, "tk_test", off as typeof fetch)).toBe(
-      "unavailable",
-    );
+    expect(
+      (await probeGatewayTools(config, "tk_test", off as typeof fetch))(
+        WEB_SEARCH.id,
+      ),
+    ).toBe("unavailable");
   });
 
   it.each([401, 403, 404, 500])(
     "reports unknown on HTTP %s, keeping requests eligible",
     async (status) => {
       const fetcher = vi.fn(async () => json(status, {}));
-      expect(
-        await probeWebSearch(config, "tk_test", fetcher as typeof fetch),
-      ).toBe("unknown");
+      const availability = await probeGatewayTools(
+        config,
+        "tk_test",
+        fetcher as typeof fetch,
+      );
+      expect(availability(WEB_SEARCH.id)).toBe("unknown");
+      expect(availability(WEB_FETCH.id)).toBe("unknown");
     },
   );
 
@@ -118,16 +135,22 @@ describe("probeWebSearch", () => {
     const down = vi.fn(async () => {
       throw new TypeError("fetch failed");
     });
-    expect(await probeWebSearch(config, "tk_test", down as typeof fetch)).toBe(
-      "unknown",
-    );
+    expect(
+      (await probeGatewayTools(config, "tk_test", down as typeof fetch))(
+        WEB_SEARCH.id,
+      ),
+    ).toBe("unknown");
     const malformed = vi.fn(async () => json(200, { unexpected: true }));
     expect(
-      await probeWebSearch(config, "tk_test", malformed as typeof fetch),
+      (await probeGatewayTools(config, "tk_test", malformed as typeof fetch))(
+        WEB_SEARCH.id,
+      ),
     ).toBe("unknown");
     const fetcher = vi.fn();
     expect(
-      await probeWebSearch(config, undefined, fetcher as typeof fetch),
+      (await probeGatewayTools(config, undefined, fetcher as typeof fetch))(
+        WEB_SEARCH.id,
+      ),
     ).toBe("unknown");
     expect(fetcher).not.toHaveBeenCalled();
   });
@@ -158,11 +181,15 @@ describe("rejectionReason", () => {
   });
 });
 
-describe("wrapFetchWithWebSearch", () => {
-  /** A fetch stub that records each request body and answers from `reply`. */
+describe("wrapFetchWithGatewayTools", () => {
+  /**
+   * A fetch stub that records each request body and answers from `reply`.
+   * Declares web search alone unless given other tool states.
+   */
   function harness(
     reply: (call: number) => Response | Promise<Response> = ok,
-    state = new WebSearchState(),
+    state = new GatewayToolState(WEB_SEARCH),
+    tools: GatewayToolState[] = [state],
   ) {
     const bodies: string[] = [];
     const fetcher = vi.fn(
@@ -172,9 +199,9 @@ describe("wrapFetchWithWebSearch", () => {
       },
     );
     const onRefused = vi.fn();
-    const wrapped = wrapFetchWithWebSearch(fetcher as typeof fetch, {
+    const wrapped = wrapFetchWithGatewayTools(fetcher as typeof fetch, {
       baseUrl: BASE_URL,
-      state,
+      tools,
       onRefused,
     });
     const sentTools = (call: number) => JSON.parse(bodies[call]).tools;
@@ -234,7 +261,7 @@ describe("wrapFetchWithWebSearch", () => {
   });
 
   it("declares nothing once the catalog said unavailable", async () => {
-    const state = new WebSearchState();
+    const state = new GatewayToolState(WEB_SEARCH);
     state.probed("unavailable");
     const { wrapped, bodies } = harness(ok, state);
     await wrapped(COMPLETIONS_URL, completionInit({ model: "m" }));
@@ -257,7 +284,7 @@ describe("wrapFetchWithWebSearch", () => {
       expect(sentTools(0)).toEqual([{ type: "otari_web_search" }]);
       expect(sentTools(1)).toEqual([]);
       expect(state.active).toBe(false);
-      expect(onRefused).toHaveBeenCalledWith(SEARCH_REFUSAL);
+      expect(onRefused).toHaveBeenCalledWith(WEB_SEARCH, SEARCH_REFUSAL);
 
       await wrapped(COMPLETIONS_URL, completionInit({ model: "m" }));
       expect(sentTools(2)).toBeUndefined();
@@ -327,5 +354,168 @@ describe("wrapFetchWithWebSearch", () => {
     const responses = await Promise.all(requests);
     expect(responses.map((r) => r.status)).toEqual([200, 200, 200]);
     expect(onRefused).toHaveBeenCalledTimes(1);
+  });
+
+  describe("with web search and web fetch", () => {
+    function both(reply: (call: number) => Response | Promise<Response>) {
+      const search = new GatewayToolState(WEB_SEARCH);
+      const fetchTool = new GatewayToolState(WEB_FETCH);
+      return {
+        ...harness(reply, search, [search, fetchTool]),
+        search,
+        fetchTool,
+      };
+    }
+
+    it("declares both, search first, after the request's own tools", async () => {
+      const { wrapped, sentTools } = both(ok);
+      await wrapped(
+        COMPLETIONS_URL,
+        completionInit({ tools: [{ type: "function" }] }),
+      );
+      expect(sentTools(0)).toEqual([
+        { type: "function" },
+        { type: "otari_web_search" },
+        { type: "otari_web_fetch" },
+      ]);
+    });
+
+    it("adds only the tool the request does not declare itself", async () => {
+      const { wrapped, sentTools } = both(ok);
+      await wrapped(
+        COMPLETIONS_URL,
+        completionInit({ tools: [{ type: "otari_web_search", max_uses: 2 }] }),
+      );
+      expect(sentTools(0)).toEqual([
+        { type: "otari_web_search", max_uses: 2 },
+        { type: "otari_web_fetch" },
+      ]);
+    });
+
+    it("drops only fetch when the gateway refuses it and keeps search", async () => {
+      const { wrapped, fetcher, sentTools, onRefused, search, fetchTool } =
+        both((call) =>
+          call === 1 ? json(403, { detail: FETCH_REFUSAL }) : ok(),
+        );
+      const response = await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(response.status).toBe(200);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(sentTools(1)).toEqual([{ type: "otari_web_search" }]);
+      expect([search.active, search.accepted]).toEqual([true, true]);
+      expect(fetchTool.active).toBe(false);
+      expect(onRefused).toHaveBeenCalledExactlyOnceWith(
+        WEB_FETCH,
+        FETCH_REFUSAL,
+      );
+    });
+
+    it("blames only search when it alone was refused, keeping fetch", async () => {
+      // No search backend: any request declaring search is a 400.
+      const { wrapped, fetcher, sentTools, onRefused, search, fetchTool } =
+        both((call) =>
+          call <= 2 ? json(400, { detail: SEARCH_REFUSAL }) : ok(),
+        );
+      const response = await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(response.status).toBe(200);
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(sentTools(2)).toBeUndefined();
+      expect(search.active).toBe(false);
+      expect([fetchTool.active, fetchTool.accepted]).toEqual([true, false]);
+      expect(onRefused).toHaveBeenCalledExactlyOnceWith(
+        WEB_SEARCH,
+        SEARCH_REFUSAL,
+      );
+
+      // Fetch only failed alongside search, so the next request tries it alone.
+      await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(sentTools(3)).toEqual([{ type: "otari_web_fetch" }]);
+      expect(fetchTool.accepted).toBe(true);
+    });
+
+    it("finds a second refused tool on the next request, with its own reason", async () => {
+      const { wrapped, fetcher, onRefused, search, fetchTool } = both((call) =>
+        call === 1 || call === 2
+          ? json(400, { detail: SEARCH_REFUSAL })
+          : call === 4
+            ? json(403, { detail: FETCH_REFUSAL })
+            : ok(),
+      );
+      await wrapped(COMPLETIONS_URL, completionInit({}));
+      await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(fetcher).toHaveBeenCalledTimes(5);
+      expect([search.active, fetchTool.active]).toEqual([false, false]);
+      expect(onRefused).toHaveBeenNthCalledWith(1, WEB_SEARCH, SEARCH_REFUSAL);
+      expect(onRefused).toHaveBeenNthCalledWith(2, WEB_FETCH, FETCH_REFUSAL);
+    });
+
+    it("settles nothing when a retry fails for another reason", async () => {
+      const { wrapped, fetcher, sentTools, onRefused, search, fetchTool } =
+        both((call) =>
+          call === 1
+            ? json(403, { detail: FETCH_REFUSAL })
+            : call === 2
+              ? json(503, {})
+              : ok(),
+        );
+      const response = await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(response.status).toBe(503);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect([search.accepted, fetchTool.accepted]).toEqual([false, false]);
+      expect(onRefused).not.toHaveBeenCalled();
+      await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(sentTools(2)).toEqual([
+        { type: "otari_web_search" },
+        { type: "otari_web_fetch" },
+      ]);
+    });
+
+    it("does not parse the body once no tool is active", async () => {
+      const { wrapped, fetcher, search, fetchTool } = both(ok);
+      search.probed("unavailable");
+      fetchTool.probed("unavailable");
+      const parse = vi.spyOn(JSON, "parse");
+      const init = completionInit({ model: "m" });
+      parse.mockClear();
+      await wrapped(COMPLETIONS_URL, init);
+      expect(parse).not.toHaveBeenCalled();
+      parse.mockRestore();
+      expect(vi.mocked(fetcher).mock.calls[0][1]).toBe(init);
+    });
+
+    it("keeps both on when the error survives every retry", async () => {
+      const { wrapped, fetcher, onRefused, search, fetchTool } = both(() =>
+        json(400, { detail: "unknown model" }),
+      );
+      const response = await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(response.status).toBe(400);
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect([search.active, fetchTool.active]).toEqual([true, true]);
+      expect(onRefused).not.toHaveBeenCalled();
+      // Settled until the next refresh: later errors pass straight through.
+      await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(fetcher).toHaveBeenCalledTimes(4);
+    });
+
+    it("never drops a tool the gateway has already accepted", async () => {
+      const { wrapped, fetcher, sentTools, search, fetchTool } = both((call) =>
+        call === 2 ? json(403, { detail: FETCH_REFUSAL }) : ok(),
+      );
+      search.accept();
+      await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(fetchTool.accepted).toBe(true);
+      fetchTool.probed("unknown");
+      await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(sentTools(2)).toEqual([{ type: "otari_web_search" }]);
+      expect([search.active, fetchTool.active]).toEqual([true, false]);
+    });
+
+    it("declares nothing for a tool the catalog marks unavailable", async () => {
+      const { wrapped, sentTools, fetchTool } = both(ok);
+      fetchTool.probed("unavailable");
+      await wrapped(COMPLETIONS_URL, completionInit({}));
+      expect(sentTools(0)).toEqual([{ type: "otari_web_search" }]);
+    });
   });
 });

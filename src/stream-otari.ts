@@ -99,7 +99,7 @@ export function withConversationId(
 
 /**
  * `wrapFetch`, when given, decorates the fetch Pi's OpenAI client uses for
- * each request; the provider uses it to declare Otari's web search tool.
+ * each request; the provider uses it to declare Otari's gateway-run tools.
  */
 export function createStreamOtari(
   catalog: Catalog,

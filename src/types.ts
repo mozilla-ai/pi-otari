@@ -33,6 +33,8 @@ export interface OtariConfig {
   officialHosted: boolean;
   /** Whether requests may declare Otari's gateway-run web search tool. */
   webSearch: boolean;
+  /** Whether requests may declare Otari's gateway-run web fetch tool. */
+  webFetch: boolean;
 }
 
 export interface DiscoveryResult {

@@ -9,6 +9,7 @@ const base: OtariConfig = {
   environmentModels: [],
   officialHosted: true,
   webSearch: true,
+  webFetch: true,
 };
 
 const response = (status: number, body: unknown): Response =>

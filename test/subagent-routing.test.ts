@@ -13,6 +13,7 @@ const config: OtariConfig = {
   environmentModels: [],
   officialHosted: false,
   webSearch: true,
+  webFetch: true,
 };
 
 const KNOWN = [
