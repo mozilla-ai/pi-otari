@@ -227,6 +227,7 @@ describe("Pi–Otari integration", () => {
 
   it("routes the selected model through Otari and continues after a tool call", async () => {
     let completionCount = 0;
+    const conversationIds: unknown[] = [];
     const server = createServer(async (request, response) => {
       expect(request.headers.authorization).toBe("Bearer tk_integration");
       if (request.method === "GET" && request.url === "/api/v1/models") {
@@ -239,6 +240,7 @@ describe("Pi–Otari integration", () => {
         request.url === "/api/v1/chat/completions"
       ) {
         completionCount += 1;
+        conversationIds.push(request.headers["otari-conversation-id"]);
         const payload = await body(request);
         expect(payload.model).toBe("test-model");
         if (completionCount === 1) {
@@ -312,6 +314,9 @@ describe("Pi–Otari integration", () => {
       await session.setModel(model);
       await session.prompt("Use echo, then finish.");
       expect(completionCount).toBe(2);
+      // Both requests of the turn carry Pi's session id, so Otari keeps them
+      // in one trace.
+      expect(conversationIds).toEqual([session.sessionId, session.sessionId]);
       expect(session.state.messages.at(-1)?.role).toBe("assistant");
     } finally {
       session.dispose();
