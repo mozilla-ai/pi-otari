@@ -92,7 +92,9 @@ const settle = (
       entries: overrides.entries ?? [],
       continue: false,
       outcome: overrides.outcome ?? "completed",
-      context: { canContinue: overrides.canContinue ?? true },
+      // pi builds this before the handler's entry, so it ends on the
+      // assistant reply and is false at a real settle.
+      context: { canContinue: overrides.canContinue ?? false },
     },
     ctx(overrides.signal ? { signal: overrides.signal } : {}),
   ) as Promise<{ entries?: unknown[]; continue?: boolean } | undefined>;
@@ -225,9 +227,12 @@ describe("guardrails", () => {
     expect(await calls()).toHaveLength(0);
   });
 
-  it("does not continue when pi cannot continue", async () => {
+  it("continues although the context before its entry cannot", async () => {
     await scenario({ code: 2, stderr: "run the tests" });
-    expect(await settle({ canContinue: false })).toBeUndefined();
+    expect(await settle({ canContinue: false })).toEqual({
+      entries: [guardrailsEntry("run the tests")],
+      continue: true,
+    });
   });
 
   it("records a judge gate's additionalContext without continuing", async () => {

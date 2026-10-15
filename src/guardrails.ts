@@ -358,8 +358,10 @@ export function registerGuardrails(
       };
     }
     if (outcome.kind !== "block" || continued) return undefined;
-    if (!event.context.canContinue) return undefined;
     continued = true;
+    // event.context.canContinue is not checked: it describes the context
+    // before this message, which ends on the assistant reply and so is always
+    // false here. The message is a user turn, and pi checks the final context.
     // Earlier handlers' proposed entries are chained, never replaced.
     return {
       entries: [...event.entries, guardrailsMessage(outcome.reason)],
