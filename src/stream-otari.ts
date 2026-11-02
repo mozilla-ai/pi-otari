@@ -1,9 +1,9 @@
 import {
   type Api,
   type AssistantMessage,
+  type AssistantMessageEventStream,
   createAssistantMessageEventStream,
   type Model,
-  openAICompletionsApi,
   type SimpleStreamOptions,
   type TranscriptContext,
 } from "@earendil-works/pi-ai/compat";
@@ -97,12 +97,23 @@ export function withConversationId(
   };
 }
 
+/** The host's OpenAI-compatible stream that Otari requests are sent through. */
+export type OtariDelegateStream = (
+  model: Model<"openai-completions">,
+  context: TranscriptContext,
+  options?: SimpleStreamOptions,
+) => AssistantMessageEventStream;
+
 /**
- * `wrapFetch`, when given, decorates the fetch Pi's OpenAI client uses for
- * each request; the provider uses it to declare Otari's gateway-run tools.
+ * `delegate` performs the request; each host passes its own OpenAI-compatible
+ * transport, so this wrapper stays host-independent.
+ *
+ * `wrapFetch`, when given, decorates the fetch the delegate uses for each
+ * request; the provider uses it to declare Otari's gateway-run tools.
  */
 export function createStreamOtari(
   catalog: Catalog,
+  delegate: OtariDelegateStream,
   wrapFetch?: (inner: typeof fetch) => typeof fetch,
 ) {
   return function streamOtari(
@@ -118,7 +129,7 @@ export function createStreamOtari(
 
     (async () => {
       try {
-        const attempt = openAICompletionsApi().streamSimple(
+        const attempt = delegate(
           openAIModel,
           context,
           withConversationId(streamOptions),

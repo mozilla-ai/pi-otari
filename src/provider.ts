@@ -5,26 +5,19 @@ import {
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DiscoveryUnavailableError, discoverModels } from "./discovery.js";
 import {
-  GATEWAY_TOOLS,
-  GatewayToolState,
-  probeGatewayTools,
-  wrapFetchWithGatewayTools,
-} from "./gateway-tools.js";
-import {
-  selectorsToModels,
+  OTARI_COMPAT,
   THINKING_LEVEL_MAP,
   toProviderModel,
 } from "./model-mapper.js";
 import {
-  type Catalog,
-  describeStale,
-  isStale,
-  replacementsFor,
-} from "./staleness.js";
+  createProviderCore,
+  type ProviderDependencies,
+} from "./provider-core.js";
 import { createStreamOtari } from "./stream-otari.js";
-import type { Diagnostic, OtariConfig, OtariModel } from "./types.js";
+import type { OtariConfig, OtariModel } from "./types.js";
+
+export type { ProviderDependencies } from "./provider-core.js";
 
 function toRuntimeModel(
   model: OtariModel,
@@ -39,10 +32,7 @@ function toRuntimeModel(
     ...(providerModel.reasoning
       ? { thinkingLevelMap: THINKING_LEVEL_MAP }
       : {}),
-    compat: {
-      maxTokensField: "max_tokens",
-      supportsDeveloperRole: false,
-    },
+    compat: OTARI_COMPAT,
   };
 }
 
@@ -78,19 +68,6 @@ function scopeToBackend<T extends { baseUrl: string }>(
   });
 }
 
-export interface ProviderDependencies {
-  fetch?: typeof fetch;
-  /** Receives every discovery diagnostic, whether returned or thrown. */
-  onDiagnostic?: (diagnostic: Diagnostic) => void;
-  /** Kept in step with each discovery; see staleness.ts. */
-  catalog?: Catalog;
-  /**
-   * Shared with the request path; each successful discovery refreshes the
-   * ones the config enables.
-   */
-  gatewayTools?: readonly GatewayToolState[];
-}
-
 export function registerOtariProvider(
   pi: ExtensionAPI,
   config: OtariConfig,
@@ -98,34 +75,7 @@ export function registerOtariProvider(
   dependencies: ProviderDependencies = {},
 ): boolean {
   const streams = openAICompletionsApi();
-  const staticModels = [
-    ...new Map(
-      [...models, ...selectorsToModels(config.environmentModels)].map(
-        (model) => [model.id, model],
-      ),
-    ).values(),
-  ];
-  const catalog = dependencies.catalog ?? new Set<string>();
-  const gatewayTools = (
-    dependencies.gatewayTools ??
-    GATEWAY_TOOLS.map((tool) => new GatewayToolState(tool))
-  ).filter((state) => config[state.tool.configKey]);
-  const reported = new Set<string>();
-  // OTARI_MODELS entries stay registered as given, since they may name models
-  // discovery does not list. Once Otari has answered, tell the user about the
-  // ones it did not list, once per selector, naming the current selector for
-  // the same model where there is one.
-  const reportStaleSelectors = () => {
-    for (const id of config.environmentModels) {
-      if (!isStale(catalog, id) || reported.has(id)) continue;
-      reported.add(id);
-      dependencies.onDiagnostic?.({
-        level: "warning",
-        code: "selector-stale",
-        message: `${describeStale(id, config.baseUrl, replacementsFor(id, catalog))} "${id}" is set in OTARI_MODELS; update or remove it there.`,
-      });
-    }
-  };
+  const core = createProviderCore(config, models, dependencies);
   const provider = createProvider({
     id: "otari",
     name: "Otari",
@@ -133,62 +83,23 @@ export function registerOtariProvider(
     auth: {
       apiKey: envApiKeyAuth("Otari API key", ["OTARI_API_KEY"]),
     },
-    models: staticModels.map((model) => toRuntimeModel(model, config.baseUrl)),
+    models: core.staticModels.map((model) =>
+      toRuntimeModel(model, config.baseUrl),
+    ),
     fetchModels: async (context) => {
       const storedToken =
         context.credential?.type === "api_key"
           ? context.credential.key
           : undefined;
-      const token = storedToken ?? config.token;
-      const fetcher = dependencies.fetch ?? fetch;
-      // Probe alongside discovery so a slow /tools never adds its own timeout
-      // to the refresh. probeGatewayTools never rejects; its answer is only
-      // applied once discovery has succeeded.
-      const probe =
-        gatewayTools.length > 0
-          ? probeGatewayTools(config, token, fetcher)
-          : undefined;
-      try {
-        const result = await discoverModels(
-          { ...config, token, environmentModels: [] },
-          fetcher,
-        );
-        for (const diagnostic of result.diagnostics)
-          dependencies.onDiagnostic?.(diagnostic);
-        catalog.clear();
-        for (const model of result.models) catalog.add(model.id);
-        reportStaleSelectors();
-        if (probe) {
-          const availability = await probe;
-          for (const state of gatewayTools)
-            state.probed(availability(state.tool.id));
-        }
-        return result.models.map((model) =>
-          toRuntimeModel(model, config.baseUrl),
-        );
-      } catch (error) {
-        if (error instanceof DiscoveryUnavailableError)
-          dependencies.onDiagnostic?.(error.diagnostic);
-        throw error;
-      }
+      const discovered = await core.discover(storedToken ?? config.token);
+      return discovered.map((model) => toRuntimeModel(model, config.baseUrl));
     },
     api: {
       ...streams,
       streamSimple: createStreamOtari(
-        catalog,
-        gatewayTools.length > 0
-          ? (inner) =>
-              wrapFetchWithGatewayTools(inner, {
-                baseUrl: config.baseUrl,
-                tools: gatewayTools,
-                onRefused: (tool, reason) =>
-                  dependencies.onDiagnostic?.({
-                    level: "warning",
-                    code: `${tool.id.replace(/^otari_/, "").replaceAll("_", "-")}-refused`,
-                    message: `Otari refused its ${tool.label} tool: ${reason.replace(/\.?$/, ".")} The request was retried without ${tool.label}, which stays off until the next model refresh. Set ${tool.setting}=off to stop declaring it.`,
-                  }),
-              })
-          : undefined,
+        core.catalog,
+        streams.streamSimple,
+        core.wrapFetch,
       ),
     },
   });
@@ -206,10 +117,7 @@ export function registerOtariProvider(
           config.baseUrl,
         ),
       };
-      if (stored) {
-        catalog.clear();
-        for (const model of stored.models) catalog.add(model.id);
-      }
+      if (stored) core.setCatalog(stored.models.map((model) => model.id));
       return provider.refreshModels?.({ ...context, stored });
     },
   });

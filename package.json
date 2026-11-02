@@ -21,6 +21,7 @@
   "files": [
     "index.ts",
     "assets",
+    "omp",
     "src",
     "README.md",
     "LICENSE"
@@ -28,6 +29,7 @@
   "keywords": [
     "pi-package",
     "pi-extension",
+    "omp-extension",
     "otari",
     "llm-gateway"
   ],
@@ -50,6 +52,12 @@
     ],
     "image": "https://raw.githubusercontent.com/mozilla-ai/pi-otari/main/assets/gallery/otari-logo.png"
   },
+  "omp": {
+    "extensions": [
+      "./omp/index.ts"
+    ],
+    "image": "https://raw.githubusercontent.com/mozilla-ai/pi-otari/main/assets/gallery/otari-logo.png"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*"
@@ -58,6 +66,8 @@
     "@biomejs/biome": "^2.5.5",
     "@earendil-works/pi-ai": "0.99.2",
     "@earendil-works/pi-coding-agent": "0.99.2",
+    "@oh-my-pi/pi-ai": "^18.15.0",
+    "@oh-my-pi/pi-coding-agent": "^18.15.0",
     "@types/node": "^26.1.2",
     "husky": "^9.1.7",
     "lint-staged": "^17.2.0",
