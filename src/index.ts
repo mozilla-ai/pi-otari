@@ -5,6 +5,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ConfigError, loadOtariConfig } from "./config.js";
 import { GATEWAY_TOOLS, GatewayToolState } from "./gateway-tools.js";
+import { registerGuardrails } from "./guardrails.js";
 import type { Catalog } from "./staleness.js";
 import { registerLifecycleUI } from "./status.js";
 import type { OtariConfig, RuntimeState } from "./types.js";
@@ -12,6 +13,9 @@ import type { OtariConfig, RuntimeState } from "./types.js";
 const MINIMUM_PI_VERSION = [0, 81, 0] as const;
 // Subagent routing reads its settings with pi.getSettings(), added in 0.99.0.
 const ROUTING_PI_VERSION = [0, 99, 0] as const;
+// First pi with the actionable `agent_before_settle` boundary guardrails use
+// for their stop check.
+const GUARDRAILS_PI_VERSION = [0, 87, 0] as const;
 
 function isAtLeast(version: string, minimum: readonly number[]): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
@@ -49,6 +53,11 @@ export function createOtariExtension(
     const ui = registerLifecycleUI(pi, () => state, catalog, gatewayTools);
 
     const piVersion = dependencies.piVersion ?? VERSION;
+    // Guardrails do not depend on Otari model routing, so they are registered
+    // before the config checks below can return early.
+    if (isAtLeast(piVersion, GUARDRAILS_PI_VERSION)) {
+      registerGuardrails(pi, { env: dependencies.env });
+    }
     if (!isAtLeast(piVersion, MINIMUM_PI_VERSION)) {
       state = {
         models: [],

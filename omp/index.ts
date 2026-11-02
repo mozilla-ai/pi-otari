@@ -3,6 +3,7 @@ import { ConfigError, loadOtariConfig } from "../src/config.js";
 import { GATEWAY_TOOLS, GatewayToolState } from "../src/gateway-tools.js";
 import type { Catalog } from "../src/staleness.js";
 import type { OtariConfig, RuntimeState } from "../src/types.js";
+import { registerGuardrails } from "./guardrails.js";
 import { registerOtariProvider } from "./provider.js";
 import { registerLifecycleUI } from "./status.js";
 
@@ -27,6 +28,9 @@ export default function otariExtension(pi: ExtensionAPI): void {
     (tool) => new GatewayToolState(tool, () => ui.refreshStatus()),
   );
   const ui = registerLifecycleUI(pi, () => state, catalog, gatewayTools);
+  // Guardrails do not depend on Otari model routing, so they are registered
+  // before the config check below can return early.
+  registerGuardrails(pi);
 
   let config: OtariConfig;
   try {
