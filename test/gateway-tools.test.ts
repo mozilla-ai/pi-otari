@@ -392,6 +392,38 @@ describe("wrapFetchWithGatewayTools", () => {
       ]);
     });
 
+    it("replaces a caller function of a declared tool's reserved name", async () => {
+      const own = (name: string) => ({ type: "function", function: { name } });
+      const { wrapped, sentTools } = both(ok);
+      await wrapped(
+        COMPLETIONS_URL,
+        completionInit({
+          tools: [own("bash"), own("web_search"), own("web_fetch")],
+        }),
+      );
+      expect(sentTools(0)).toEqual([
+        own("bash"),
+        { type: "otari_web_search" },
+        { type: "otari_web_fetch" },
+      ]);
+    });
+
+    it("restores the caller's function once its gateway tool is dropped", async () => {
+      const own = (name: string) => ({ type: "function", function: { name } });
+      const { wrapped, sentTools, fetchTool } = both((call) =>
+        call === 1 ? json(403, { detail: FETCH_REFUSAL }) : ok(),
+      );
+      await wrapped(
+        COMPLETIONS_URL,
+        completionInit({ tools: [own("web_search"), own("web_fetch")] }),
+      );
+      expect(sentTools(1)).toEqual([
+        own("web_fetch"),
+        { type: "otari_web_search" },
+      ]);
+      expect(fetchTool.active).toBe(false);
+    });
+
     it("drops only fetch when the gateway refuses it and keeps search", async () => {
       const { wrapped, fetcher, sentTools, onRefused, search, fetchTool } =
         both((call) =>

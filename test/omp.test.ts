@@ -186,4 +186,16 @@ describe("omp lifecycle UI", () => {
       "warning",
     );
   });
+
+  it("shows a diagnostic reported before the session started", async () => {
+    const { handlers, ui } = lifecycle(state("key"));
+    ui.reportDiagnostic({
+      level: "warning",
+      code: "selector-stale",
+      message: "early",
+    });
+    const ctx = context({ source: { kind: "api_key" } });
+    await handlers.get("session_start")?.({}, ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith("early", "warning");
+  });
 });

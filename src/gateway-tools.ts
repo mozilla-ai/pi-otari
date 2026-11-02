@@ -16,6 +16,11 @@ export interface GatewayTool {
   setting: string;
   /** The config field that variable is parsed into. */
   configKey: "webSearch" | "webFetch";
+  /**
+   * The function name the gateway reserves while this tool is declared: a
+   * request that also defines its own function by this name is rejected.
+   */
+  reservedName: string;
 }
 
 export const WEB_SEARCH: GatewayTool = {
@@ -23,6 +28,7 @@ export const WEB_SEARCH: GatewayTool = {
   label: "web search",
   setting: "OTARI_WEB_SEARCH",
   configKey: "webSearch",
+  reservedName: "web_search",
 };
 
 export const WEB_FETCH: GatewayTool = {
@@ -30,6 +36,7 @@ export const WEB_FETCH: GatewayTool = {
   label: "web fetch",
   setting: "OTARI_WEB_FETCH",
   configKey: "webFetch",
+  reservedName: "web_fetch",
 };
 
 /** In the order they are declared; a refusal is checked last tool first. */
@@ -230,6 +237,10 @@ export interface GatewayToolsFetchOptions {
  * later errors pass straight through until the next refresh. Any other
  * failure on a retry (a 429 or 5xx) settles nothing.
  *
+ * A caller function named as a declared tool's reserved name is left out of
+ * that attempt, since the gateway rejects the pair; the gateway's tool does
+ * the same job.
+ *
  * Requests that are not Otari completions, have no JSON string body (the SDK
  * always sends one), or already declare every tool pass through untouched.
  */
@@ -250,16 +261,24 @@ export function wrapFetchWithGatewayTools(
     );
     if (!body || sent.length === 0) return inner(input, init);
 
-    const send = (states: GatewayToolState[]) =>
-      states.length === 0
-        ? inner(input, init)
-        : inner(input, {
-            ...init,
-            body: JSON.stringify({
-              ...body,
-              tools: [...own, ...states.map(({ tool }) => ({ type: tool.id }))],
-            }),
-          });
+    const send = (states: GatewayToolState[]) => {
+      if (states.length === 0) return inner(input, init);
+      // The gateway's tool replaces a caller function of the name it reserves
+      // (omp's built-in web_search, say), which would otherwise get the whole
+      // request rejected. Dropping the gateway tool restores the caller's.
+      const reserved = new Set(states.map(({ tool }) => tool.reservedName));
+      const kept = own.filter((tool) => {
+        const fn = record(record(tool)?.function);
+        return !(typeof fn?.name === "string" && reserved.has(fn.name));
+      });
+      return inner(input, {
+        ...init,
+        body: JSON.stringify({
+          ...body,
+          tools: [...kept, ...states.map(({ tool }) => ({ type: tool.id }))],
+        }),
+      });
+    };
 
     let response = await send(sent);
     const dropped: GatewayToolState[] = [];

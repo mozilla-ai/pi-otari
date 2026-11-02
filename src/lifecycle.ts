@@ -70,6 +70,9 @@ export function createLifecycle(
   gatewayTools: readonly GatewayToolState[] = [],
 ): LifecycleCore {
   let ui: LifecycleContext["ui"] | undefined;
+  // Diagnostics that arrive before any session event has shown a UI, such as
+  // a discovery the host runs before session_start; shown once one has.
+  let pending: Diagnostic[] | undefined = [];
   let shown:
     | { ctx: LifecycleContext; provider?: string; id?: string }
     | undefined;
@@ -89,6 +92,11 @@ export function createLifecycle(
   };
   const show = (ctx: LifecycleContext, model: SelectedModel) => {
     ui = ctx.hasUI ? ctx.ui : undefined;
+    if (ui && pending) {
+      for (const diagnostic of pending)
+        ui.notify(diagnostic.message, diagnostic.level);
+      pending = undefined;
+    }
     shown = { ctx, provider: model?.provider, id: model?.id };
     updateStatus();
   };
@@ -151,7 +159,8 @@ export function createLifecycle(
       warnIfStale(ctx, ctx.model);
     },
     reportDiagnostic(diagnostic) {
-      ui?.notify(diagnostic.message, diagnostic.level);
+      if (ui) ui.notify(diagnostic.message, diagnostic.level);
+      else pending?.push(diagnostic);
     },
     refreshStatus: updateStatus,
     recheckModel() {
