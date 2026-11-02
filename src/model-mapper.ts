@@ -15,6 +15,15 @@ export const THINKING_LEVEL_MAP = {
   max: "max",
 } as const;
 
+/**
+ * OpenAI wire settings for every Otari model: Otari routes to backends that
+ * take max_tokens and do not accept the developer role.
+ */
+export const OTARI_COMPAT = {
+  maxTokensField: "max_tokens",
+  supportsDeveloperRole: false,
+} as const;
+
 const ZERO_COST: ModelCost = {
   input: 0,
   output: 0,
