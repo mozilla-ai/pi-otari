@@ -68,6 +68,34 @@ pi update npm:@mozilla-ai/pi-otari
 pi remove npm:@mozilla-ai/pi-otari
 ```
 
+## Install and use on omp
+
+The same package is an [omp](https://github.com/oh-my-pi/omp) plugin: omp reads the `omp.extensions` manifest (and ignores the Pi one), while Pi ignores the omp manifest, so one npm package serves both hosts.
+
+1. Install the plugin:
+
+   ```bash
+   omp plugin install @mozilla-ai/pi-otari
+   ```
+
+2. Log in with your Otari workspace API key, either from a shell or inside the TUI:
+
+   ```bash
+   omp login otari
+   ```
+
+   This is the same masked API-key prompt as on Pi, not OAuth; the key is stored in omp's credential store and wins over `OTARI_API_KEY`, exactly like Pi's `/login otari`. For CI and containers, set `OTARI_API_KEY` instead.
+
+3. Pick an `otari` model with `/model` and prompt normally. omp discovers the Otari catalog through the extension and shows every authenticated model; there is no `/scoped-models` step. The status line shows `Otari → <model-id>`.
+
+### Differences from the Pi extension
+
+- **Model cache:** omp caches discovered models in its own model store with a 24-hour TTL instead of refreshing on every `/model` open. Run `omp models refresh` after enabling or removing models in Otari. Switching `OTARI_BASE_URL` between deployments may serve the previous deployment's cached list until a refresh.
+- **Model list:** `omp models otari` lists the Otari models omp currently knows.
+- **Status updates:** the `Otari → <model-id>` status line refreshes at session start and at each turn; omp has no model-select event.
+- **Subagent routing:** not available on omp. The Pi feature integrates with pi-subagents, which is Pi-only, and omp's `before_subagent_spawn` event does not carry the subagent's task text that Otari needs to recommend a model.
+- Everything else — `OTARI_BASE_URL`, `OTARI_MODELS`, `OTARI_WEB_SEARCH`/`OTARI_WEB_FETCH` with refusal retry, reasoning levels, the `Otari-Conversation-Id` header, and the diagnostics in [Troubleshooting](#troubleshooting) — behaves the same. Read `pi` as `omp` in those sections (for example `~/.omp/agent` where `~/.pi/agent` is named).
+
 ## Model discovery
 
 After login and during provider refresh, the extension queries `{OTARI_BASE_URL}/models` (`https://api.otari.ai/api/v1/models` for hosted otari) with the workspace token. Only models available through providers enabled for the authenticated workspace are registered. If the hosted endpoint responds with `404` or `405`, the extension reports that hosted model discovery is unavailable. It does not request a public catalog or substitute models outside the authenticated discovery response.

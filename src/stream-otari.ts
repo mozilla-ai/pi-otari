@@ -3,8 +3,8 @@ import {
   type AssistantMessage,
   createAssistantMessageEventStream,
   type Model,
-  openAICompletionsApi,
   type SimpleStreamOptions,
+  streamSimple,
   type TranscriptContext,
 } from "@earendil-works/pi-ai/compat";
 import {
@@ -100,10 +100,17 @@ export function withConversationId(
 /**
  * `wrapFetch`, when given, decorates the fetch Pi's OpenAI client uses for
  * each request; the provider uses it to declare Otari's gateway-run tools.
+ *
+ * `apiKeyResolver`, when given, replaces the delegate's apiKey. omp hands
+ * custom stream handlers the provider-config apiKey as a literal string,
+ * without env-var resolution or /login precedence, so the omp entry passes a
+ * resolver the host's auth layer invokes per attempt instead. Pi resolves
+ * credentials itself and leaves this unset.
  */
 export function createStreamOtari(
   catalog: Catalog,
   wrapFetch?: (inner: typeof fetch) => typeof fetch,
+  apiKeyResolver?: unknown,
 ) {
   return function streamOtari(
     model: Model<Api>,
@@ -111,14 +118,26 @@ export function createStreamOtari(
     options?: SimpleStreamOptions,
   ) {
     const stream = createAssistantMessageEventStream();
-    const openAIModel = model as Model<"openai-completions">;
-    const streamOptions: SimpleStreamOptions | undefined = wrapFetch
+    // Force the stock OpenAI-compatible transport: under omp the model arrives
+    // with the extension's own api id, and delegating with it would re-enter
+    // this custom stream. Under Pi the id is already "openai-completions".
+    const openAIModel = {
+      ...model,
+      api: "openai-completions",
+    } as Model<"openai-completions">;
+    let streamOptions: SimpleStreamOptions | undefined = wrapFetch
       ? { ...options, fetch: wrapFetch(options?.fetch ?? fetch) }
       : options;
+    if (apiKeyResolver !== undefined) {
+      streamOptions = {
+        ...streamOptions,
+        apiKey: apiKeyResolver as SimpleStreamOptions["apiKey"],
+      };
+    }
 
     (async () => {
       try {
-        const attempt = openAICompletionsApi().streamSimple(
+        const attempt = streamSimple(
           openAIModel,
           context,
           withConversationId(streamOptions),
