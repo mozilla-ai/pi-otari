@@ -7,6 +7,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerGuardrails as registerOmpGuardrails } from "../omp/guardrails.js";
 import { registerGuardrails } from "../src/guardrails.js";
 
 type Handler = (event: unknown, ctx: ExtensionContext) => unknown;
@@ -59,14 +60,24 @@ function ctx(overrides: Partial<ExtensionContext> = {}): ExtensionContext {
   } as unknown as ExtensionContext;
 }
 
-function register(env: Record<string, string> = {}, timeoutMs?: number) {
+let sendMessage: ReturnType<typeof vi.fn>;
+
+function register(
+  env: Record<string, string> = {},
+  timeoutMs?: number,
+  host: "pi" | "omp" = "pi",
+) {
   handlers = {};
+  sendMessage = vi.fn();
   const pi = {
     on: (name: string, handler: Handler) => {
       handlers[name] = handler;
     },
+    sendMessage,
   } as unknown as ExtensionAPI;
-  registerGuardrails(pi, {
+  (host === "omp"
+    ? (registerOmpGuardrails as unknown as typeof registerGuardrails)
+    : registerGuardrails)(pi, {
     env: { OTARI_HOOK_BIN: bin, PATH: "", ...env },
     home,
     timeoutMs,
@@ -349,5 +360,123 @@ describe("guardrails", () => {
       ctx({ cwd: nested }),
     );
     expect(result).toEqual({ block: true, reason: "nope" });
+  });
+});
+
+describe("omp guardrails", () => {
+  beforeEach(() => register({}, undefined, "omp"));
+
+  const stop = (
+    overrides: { stopHookActive?: boolean; stopReason?: string } = {},
+  ) =>
+    handlers.session_stop(
+      {
+        type: "session_stop",
+        messages: [],
+        turn_id: 0,
+        last_assistant_message: {
+          role: "assistant",
+          stopReason: overrides.stopReason ?? "stop",
+        },
+        session_id: "s",
+        stop_hook_active: overrides.stopHookActive ?? false,
+        signal: new AbortController().signal,
+      },
+      ctx(),
+    ) as Promise<
+      { continue?: boolean; additionalContext?: string } | undefined
+    >;
+
+  it("sends the pi-native payload and blocks on exit 2", async () => {
+    await scenario({ code: 2, stderr: "no CHANGELOG edits\n" });
+    expect(
+      await toolCall("write", { path: "CHANGELOG.md", content: "x" }),
+    ).toEqual({ block: true, reason: "no CHANGELOG edits" });
+    const [call] = await calls();
+    expect(call.args).toEqual(["hook", "--harness", "pi"]);
+    expect(call.payload).toEqual({
+      hook_event_name: "PreToolUse",
+      cwd: repo,
+      tool_name: "write",
+      tool_input: { path: "CHANGELOG.md", content: "x" },
+    });
+  });
+
+  it("checks every file of a multi-file hashline edit", async () => {
+    await scenario({ code: 2, stderr: "blocked" });
+    expect(
+      await toolCall("edit", { input: "...", paths: ["a.ts", "b.ts"] }),
+    ).toEqual({ block: true, reason: "blocked" });
+    const paths = (await calls()).map(
+      (call) => (call.payload.tool_input as { path: string }).path,
+    );
+    expect(paths.sort()).toEqual(["a.ts", "b.ts"]);
+  });
+
+  it("passes PreToolUse additionalContext to the model", async () => {
+    await scenario({
+      stdout: JSON.stringify({
+        hookSpecificOutput: { additionalContext: "mind the tests" },
+      }),
+    });
+    expect(await toolCall("read", { path: "a.ts" })).toEqual({
+      additionalContext: "mind the tests",
+    });
+  });
+
+  it("continues on a failed stop check, with the session's commands", async () => {
+    await toolCall("bash", { command: "make lint" });
+    await scenario({ code: 2, stderr: "run make test" });
+    expect(await stop()).toEqual({
+      continue: true,
+      additionalContext: "run make test",
+    });
+    const payload = (await calls()).at(-1)?.payload;
+    expect(payload).toMatchObject({
+      hook_event_name: "Stop",
+      stop_hook_active: false,
+      bash_commands: ["make lint"],
+    });
+    expect(notify).toHaveBeenCalledWith(
+      "Otari guardrails: run make test",
+      "warning",
+    );
+  });
+
+  it("never continues a second time in the same run", async () => {
+    await scenario({ code: 2, stderr: "still failing" });
+    expect(await stop({ stopHookActive: true })).toBeUndefined();
+    expect((await calls()).at(-1)?.payload.stop_hook_active).toBe(true);
+  });
+
+  it("never checks or resumes an errored or aborted turn", async () => {
+    await scenario({ code: 2, stderr: "x" });
+    expect(await stop({ stopReason: "error" })).toBeUndefined();
+    expect(await stop({ stopReason: "aborted" })).toBeUndefined();
+    expect(await calls()).toEqual([]);
+  });
+
+  it("records a judge gate's additionalContext without continuing", async () => {
+    await scenario({
+      stdout: JSON.stringify({
+        hookSpecificOutput: { additionalContext: "judge: missing tests" },
+      }),
+    });
+    expect(await stop()).toBeUndefined();
+    expect(sendMessage).toHaveBeenCalledWith(
+      {
+        customType: "otari-guardrails",
+        content: "judge: missing tests",
+        display: true,
+      },
+      { deliverAs: "nextTurn" },
+    );
+  });
+
+  it("resets the recorded bash commands on session_switch", async () => {
+    await toolCall("bash", { command: "one" });
+    handlers.session_switch({ type: "session_switch" }, ctx());
+    await stop();
+    expect((await calls()).at(-1)?.payload.bash_commands).toEqual([]);
   });
 });

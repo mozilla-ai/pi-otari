@@ -94,6 +94,7 @@ The same package is an [omp](https://github.com/oh-my-pi/omp) plugin: omp reads 
 - **Model list:** `omp models otari` lists the Otari models omp currently knows.
 - **Status updates:** the `Otari → <model-id>` status line refreshes at session start and at each turn; omp has no model-select event.
 - **Subagent routing:** not available on omp. The Pi feature integrates with pi-subagents, which is Pi-only, and omp's `before_subagent_spawn` event does not carry the subagent's task text that Otari needs to recommend a model.
+- **Guardrails:** supported, with the differences listed under [Guardrails](#guardrails).
 - Everything else — `OTARI_BASE_URL`, `OTARI_MODELS`, `OTARI_WEB_SEARCH`/`OTARI_WEB_FETCH` with refusal retry, reasoning levels, the `Otari-Conversation-Id` header, and the diagnostics in [Troubleshooting](#troubleshooting) — behaves the same. Read `pi` as `omp` in those sections (for example `~/.omp/agent` where `~/.pi/agent` is named).
 
 ## Model discovery
@@ -178,6 +179,13 @@ Pi obeys the same Otari agent guardrails as Claude Code and Codex: the rules in 
 Guardrails are active only when the `otari` binary is on `PATH` (or set `OTARI_HOOK_BIN`) and a guardrails file exists, searching from the working directory up to the git root and then `~/.otari/`. Set `OTARI_GUARDRAILS=off` to disable them. If `otari` cannot be run, times out after about 20 seconds or exits unexpectedly, the action is allowed and you get a single warning.
 
 Install an `otari` release with `--harness pi` support for full fidelity, including the commands Pi ran in the session. With an older `otari`, the extension detects the missing support once and sends Claude Code-shaped payloads instead, without the session's command list on stop checks.
+
+On omp, guardrails run through omp's `tool_call` and `session_stop` events, and `otari` is called with the Pi harness, since omp's tools take the same inputs. They differ from Pi in a few ways:
+
+- A hashline `edit` that patches several files is checked once per file and refused if any file is blocked.
+- The reason for a forced continuation reaches the model as a hidden message, so it is also shown to you as a warning.
+- Advisory context returned on a tool call reaches the model along with the tool result.
+- Stop checks do not run for subagents, which omp never stops through `session_stop`.
 
 ## Non-interactive authentication
 
