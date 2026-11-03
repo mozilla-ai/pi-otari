@@ -140,7 +140,7 @@ async function main(): Promise<void> {
       );
       assert.ok(
         model,
-        "Set OTARI_LIVE_TEST_MODEL to a model selector that gateway lists, for example nebius:Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "Set OTARI_LIVE_TEST_MODEL to a model selector that gateway lists, for example alibaba/qwen3-30b-a3b-instruct-2507",
       );
       note(
         `${baseUrl}, model ${model}, ${maxTokens} output tokens${reasoning ? `, reasoning ${reasoning}` : ""}`,
