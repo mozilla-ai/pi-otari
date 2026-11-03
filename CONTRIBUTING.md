@@ -89,7 +89,7 @@ Against hosted Otari:
 
 ```bash
 OTARI_LIVE_TEST_TOKEN=your_otari_key \
-OTARI_LIVE_TEST_MODEL=nebius:Qwen/Qwen3-30B-A3B-Instruct-2507 \
+OTARI_LIVE_TEST_MODEL=alibaba/qwen3-30b-a3b-instruct-2507 \
 npm run test:live
 ```
 

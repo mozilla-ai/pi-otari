@@ -95,7 +95,7 @@ jobs:
         shell: bash
         env:
           OTARI_LIVE_TEST_TOKEN: ${{ secrets.OTARI_LIVE_TEST_TOKEN }}
-          OTARI_LIVE_TEST_MODEL: ${{ inputs.model || vars.OTARI_LIVE_TEST_MODEL || 'nebius:Qwen/Qwen3-30B-A3B-Instruct-2507' }}
+          OTARI_LIVE_TEST_MODEL: ${{ inputs.model || vars.OTARI_LIVE_TEST_MODEL || 'alibaba/qwen3-30b-a3b-instruct-2507' }}
           OTARI_LIVE_TEST_MAX_TOKENS: ${{ inputs.max_tokens }}
           OTARI_LIVE_TEST_REASONING: ${{ inputs.reasoning }}
         run: npm run test:live 2>&1 | tee live.log
