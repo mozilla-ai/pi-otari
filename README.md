@@ -36,7 +36,9 @@
    pi
    ```
 
-3. Run `/login otari` and enter your Otari workspace API key in Pi's secret authentication prompt. This is API-key authentication, not OAuth: the prompt is separate from chat, so the key is not added to model context or sent to an LLM.
+3. Run `/login otari`, pick where your workspace lives — **otari.ai**, **otari.ai, EU region**, or **Your own gateway…** (then enter its URL, such as `http://localhost:8000`; `/api/v1` is added when left out) — and enter your Otari workspace API key in Pi's secret authentication prompt. This is API-key authentication, not OAuth: the prompt is separate from chat, so the key is not added to model context or sent to an LLM.
+
+   The key is checked against the gateway's model list before it is saved, so a wrong key or URL fails at login. otari.ai serves a key only in the region that minted it; if you pick the wrong region, the extension switches to the right one and tells you. The gateway URL is saved with the key, so later sessions use it without `OTARI_BASE_URL`.
 
    Pi stores the credential in `~/.pi/agent/auth.json`, a plaintext file created with user-only permissions (`0600`). Keep that file out of source control and untrusted backups. Run `/logout otari` to remove the stored credential.
 
@@ -195,18 +197,18 @@ For CI, containers, and other noninteractive environments, provide the API key t
 OTARI_API_KEY=tk_example pi
 ```
 
-A key stored through `/login otari` takes precedence over `OTARI_API_KEY`. Running `/logout otari` removes the stored key, but Pi will continue using `OTARI_API_KEY` if it is set.
+A key stored through `/login otari` takes precedence over `OTARI_API_KEY`, and the gateway chosen at login takes precedence over `OTARI_BASE_URL`. Running `/logout otari` removes the stored key and gateway, but Pi will continue using `OTARI_API_KEY` (with `OTARI_BASE_URL`, or hosted otari.ai) if it is set. A key saved by an older version of the extension has no gateway recorded and keeps using `OTARI_BASE_URL`.
 
-## Self-hosted Otari
+## otari.ai EU region and self-hosted Otari
+
+The simplest way is `/login otari`, choosing **otari.ai, EU region** or **Your own gateway…**. Alternatively, set the URL in the environment:
 
 ```bash
 export OTARI_BASE_URL=https://otari.example.com/api/v1
 pi
 ```
 
-`OTARI_BASE_URL` must include the gateway's API prefix, because Pi appends `/chat/completions` and discovery appends `/models` to it. Otari 0.6.0 and newer serve `/api/v1`; gateways older than 0.6.0 served `/v1`. A bare origin such as `https://otari.example.com` is rejected. For a gateway on your own machine, use `http://localhost:8000/api/v1`.
-
-Then run `/login otari`. For noninteractive use, set both `OTARI_BASE_URL` and `OTARI_API_KEY`.
+`OTARI_BASE_URL` must include the gateway's API prefix, because Pi appends `/chat/completions` and discovery appends `/models` to it. Otari 0.6.0 and newer serve `/api/v1`; gateways older than 0.6.0 served `/v1`. A bare origin such as `https://otari.example.com` is rejected. For a gateway on your own machine, use `http://localhost:8000/api/v1`; for otari.ai's EU region, use `https://eu.api.otari.ai/api/v1`. For noninteractive use, set both `OTARI_BASE_URL` and `OTARI_API_KEY`.
 
 HTTP is accepted only for loopback development endpoints.
 
@@ -215,7 +217,7 @@ HTTP is accepted only for loopback development endpoints.
 | Variable | Default | Description |
 |---|---|---|
 | `OTARI_API_KEY` | none | Workspace token or standalone key fallback when no stored credential exists |
-| `OTARI_BASE_URL` | `https://api.otari.ai/api/v1` | OpenAI-compatible base URL, including the gateway's API prefix |
+| `OTARI_BASE_URL` | `https://api.otari.ai/api/v1` | OpenAI-compatible base URL, including the gateway's API prefix; a gateway chosen at `/login otari` wins |
 | `OTARI_DISCOVERY_TIMEOUT_MS` | `5000` | Discovery timeout from 1000 to 30000 ms |
 | `OTARI_MODELS` | none | Conditional fallback or additional model selectors |
 | `OTARI_WEB_SEARCH` | `on` | Declare Otari's gateway-run web search tool on Otari requests; `off` disables it |

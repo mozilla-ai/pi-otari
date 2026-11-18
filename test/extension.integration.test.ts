@@ -756,7 +756,8 @@ describe("Pi–Otari integration", () => {
       throw new Error("Expected TCP server");
 
     vi.stubEnv("OTARI_API_KEY", "");
-    vi.stubEnv("OTARI_BASE_URL", `http://127.0.0.1:${address.port}/api/v1`);
+    // The gateway comes from the login, not the environment.
+    vi.stubEnv("OTARI_BASE_URL", "");
     const agentDir = await mkdtemp(join(tmpdir(), "pi-otari-login-"));
     const cwd = await mkdtemp(join(tmpdir(), "pi-otari-cwd-"));
     const resourceLoader = new DefaultResourceLoader({
@@ -776,8 +777,14 @@ describe("Pi–Otari integration", () => {
       | undefined;
 
     try {
+      const gatewayUrl = `http://127.0.0.1:${address.port}`;
       await session.modelRuntime.login("otari", "api_key", {
-        prompt: async () => "tk_login_integration",
+        prompt: async (prompt) =>
+          prompt.type === "select"
+            ? "custom"
+            : prompt.type === "text"
+              ? gatewayUrl
+              : "tk_login_integration",
         notify: () => {},
       });
       // Since Pi 0.86 login only stores the credential; the /login command
@@ -818,7 +825,10 @@ describe("Pi–Otari integration", () => {
       ).session;
       await resumedSession.modelRuntime.refresh({ allowNetwork: false });
       expect(await resumedSession.modelRuntime.getAuth("otari")).toMatchObject({
-        auth: { apiKey: "tk_login_integration" },
+        auth: {
+          apiKey: "tk_login_integration",
+          baseUrl: `${gatewayUrl}/api/v1`,
+        },
         source: "stored credential",
       });
       const resumedModel = resumedSession.modelRuntime.getModel(
