@@ -37,18 +37,17 @@ async function scenario(options: {
 async function calls(): Promise<
   { args: string[]; payload: Record<string, unknown> }[]
 > {
-  const args = (await readFile(join(root, "args.log"), "utf8").catch(() => ""))
-    .split("\n")
-    .filter(Boolean);
-  const stdin = (
-    await readFile(join(root, "stdin.log"), "utf8").catch(() => "")
+  // One line per call, written in a single append so concurrent calls
+  // (a multi-file edit checks each file at once) never interleave.
+  const lines = (
+    await readFile(join(root, "calls.log"), "utf8").catch(() => "")
   )
     .split("\n")
     .filter(Boolean);
-  return stdin.map((line, index) => ({
-    args: args[index].split(" "),
-    payload: JSON.parse(line),
-  }));
+  return lines.map((line) => {
+    const [args, payload] = line.split("\t");
+    return { args: args.split(" "), payload: JSON.parse(payload) };
+  });
 }
 
 function ctx(overrides: Partial<ExtensionContext> = {}): ExtensionContext {
@@ -131,9 +130,8 @@ beforeEach(async () => {
     `#!/bin/sh
 D="${root}"
 if [ "$2" = "--help" ]; then cat "$D/help"; exit 0; fi
-echo "$*" >> "$D/args.log"
-cat >> "$D/stdin.log"
-echo >> "$D/stdin.log"
+P=$(cat)
+printf '%s\t%s\n' "$*" "$P" >> "$D/calls.log"
 cat "$D/out"
 cat "$D/err" >&2
 exit "$(cat "$D/code")"
