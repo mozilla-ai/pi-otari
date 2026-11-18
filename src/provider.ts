@@ -1,10 +1,12 @@
 import {
+  type Credential,
   createProvider,
-  envApiKeyAuth,
   type Model,
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { useDeployment } from "./config.js";
+import { otariApiKeyAuth, storedDeployment } from "./login.js";
 import {
   OTARI_COMPAT,
   THINKING_LEVEL_MAP,
@@ -76,17 +78,31 @@ export function registerOtariProvider(
 ): boolean {
   const streams = openAICompletionsApi();
   const core = createProviderCore(config, models, dependencies);
+  const fromEnvironment = {
+    baseUrl: config.baseUrl,
+    officialHosted: config.officialHosted,
+  };
+  // A key saved with /login carries the gateway it belongs to; follow it, or
+  // fall back to OTARI_BASE_URL for an environment key or an older login.
+  const followCredential = (credential: Credential | undefined) =>
+    useDeployment(
+      config,
+      (credential?.type === "api_key" && credential.key
+        ? storedDeployment(credential)
+        : undefined) ?? fromEnvironment,
+    );
   const provider = createProvider({
     id: "otari",
     name: "Otari",
     baseUrl: config.baseUrl,
     auth: {
-      apiKey: envApiKeyAuth("Otari API key", ["OTARI_API_KEY"]),
+      apiKey: otariApiKeyAuth(config, () => dependencies.fetch ?? fetch),
     },
     models: core.staticModels.map((model) =>
       toRuntimeModel(model, config.baseUrl),
     ),
     fetchModels: async (context) => {
+      followCredential(context.credential);
       const storedToken =
         context.credential?.type === "api_key"
           ? context.credential.key
@@ -110,6 +126,7 @@ export function registerOtariProvider(
     // discovery, so selectors can be checked from session start, with the
     // network refresh taking over once it answers.
     refreshModels: async (context) => {
+      followCredential(context.credential);
       const stored = context.stored && {
         ...context.stored,
         models: scopeToBackend(

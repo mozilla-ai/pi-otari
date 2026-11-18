@@ -117,24 +117,259 @@ describe("registerOtariProvider", () => {
     expect(JSON.stringify(provider)).not.toContain(config.token);
   });
 
-  it("stores login input as an API-key credential without OAuth", async () => {
-    const pi = fakePi();
-    registerOtariProvider(pi, config, []);
-    const provider = registeredProvider(pi);
-    const login = provider.auth.apiKey?.login;
-    expect(login).toBeTypeOf("function");
-    expect(provider.auth.oauth).toBeUndefined();
-    expect(
-      await login?.({
+  describe("login", () => {
+    type Interaction = Parameters<
+      NonNullable<NonNullable<Provider["auth"]["apiKey"]>["login"]>
+    >[0];
+    type Prompt = Parameters<Interaction["prompt"]>[0];
+
+    /** Answers each prompt by its type, recording what was asked. */
+    function interaction(answers: Partial<Record<Prompt["type"], string>>) {
+      const prompts: Prompt[] = [];
+      const notices: string[] = [];
+      const value: Interaction = {
         prompt: async (prompt) => {
-          expect(prompt.type).toBe("secret");
-          expect(prompt.message).toContain("Otari API key");
-          return "tk_stored";
+          prompts.push(prompt);
+          return answers[prompt.type] ?? "";
         },
-        notify: () => {},
+        notify: (event) => {
+          if ("message" in event) notices.push(event.message);
+        },
         signal: new AbortController().signal,
-      }),
-    ).toEqual({ type: "api_key", key: "tk_stored" });
+      };
+      return { value, prompts, notices };
+    }
+
+    function modelsOk() {
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }
+
+    function setup(fetcher: (url: string) => Response | Promise<Response>) {
+      const own = { ...config };
+      const fetchMock = vi.fn(async (url: string | URL | Request) =>
+        fetcher(String(url)),
+      );
+      const pi = fakePi();
+      registerOtariProvider(pi, own, [], {
+        fetch: fetchMock as unknown as typeof fetch,
+      });
+      const auth = registeredProvider(pi).auth.apiKey;
+      if (!auth?.login) throw new Error("Expected API-key login");
+      return { own, fetchMock, auth, login: auth.login };
+    }
+
+    it("offers otari.ai, its EU region and your own gateway, then stores the key with its gateway", async () => {
+      const { login, fetchMock, auth } = setup(modelsOk);
+      expect(auth.name).toBe("Otari API key");
+      const { value, prompts } = interaction({
+        select: "otari-eu",
+        secret: " tk_eu ",
+      });
+
+      expect(await login(value)).toEqual({
+        type: "api_key",
+        key: "tk_eu",
+        env: { OTARI_BASE_URL: "https://eu.api.otari.ai/api/v1" },
+      });
+      const select = prompts[0];
+      expect(select?.type).toBe("select");
+      expect(select?.type === "select" && select.options).toEqual([
+        expect.objectContaining({
+          id: "otari",
+          description: "https://api.otari.ai/api/v1",
+        }),
+        expect.objectContaining({
+          id: "otari-eu",
+          description: "https://eu.api.otari.ai/api/v1",
+        }),
+        expect.objectContaining({ id: "custom" }),
+      ]);
+      expect(prompts[1]).toMatchObject({ type: "secret" });
+      expect(prompts[1]?.message).toContain("Otari API key");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://eu.api.otari.ai/api/v1/models",
+        expect.anything(),
+      );
+    });
+
+    it("asks for your own gateway's URL and adds the API prefix", async () => {
+      const { login, own } = setup(modelsOk);
+      const { value, prompts } = interaction({
+        select: "custom",
+        text: "http://localhost:8000",
+        secret: "tk_local",
+      });
+
+      expect(await login(value)).toEqual({
+        type: "api_key",
+        key: "tk_local",
+        env: { OTARI_BASE_URL: "http://localhost:8000/api/v1" },
+      });
+      expect(prompts.map((prompt) => prompt.type)).toEqual([
+        "select",
+        "text",
+        "secret",
+      ]);
+      expect(own).toMatchObject({
+        baseUrl: "http://localhost:8000/api/v1",
+        officialHosted: false,
+      });
+    });
+
+    it("rejects a non-loopback HTTP gateway URL", async () => {
+      const { login, fetchMock } = setup(modelsOk);
+      const { value } = interaction({
+        select: "custom",
+        text: "http://otari.example.com",
+        secret: "tk",
+      });
+      await expect(login(value)).rejects.toThrow(/HTTPS/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("moves to the region a 421 names", async () => {
+      const { login, fetchMock } = setup((url) =>
+        url.startsWith("https://api.otari.ai/")
+          ? new Response(
+              JSON.stringify({
+                detail:
+                  "This API key belongs to eu.api.otari.ai. Send requests there.",
+              }),
+              { status: 421 },
+            )
+          : modelsOk(),
+      );
+      const { value, notices } = interaction({
+        select: "otari",
+        secret: "tk_eu",
+      });
+
+      expect(await login(value)).toMatchObject({
+        env: { OTARI_BASE_URL: "https://eu.api.otari.ai/api/v1" },
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(notices.join("\n")).toContain("EU region");
+    });
+
+    it("never follows a 421 to a host outside otari.ai", async () => {
+      const { login, fetchMock } = setup(
+        () =>
+          new Response(
+            JSON.stringify({
+              detail: "This API key belongs to evil.example. Send it there.",
+            }),
+            { status: 421 },
+          ),
+      );
+      const { value } = interaction({ select: "otari", secret: "tk" });
+      await expect(login(value)).rejects.toThrow("HTTP 421");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails the login when the gateway rejects the key", async () => {
+      const { login } = setup(() => new Response("", { status: 401 }));
+      const { value } = interaction({ select: "otari", secret: "tk_bad" });
+      await expect(login(value)).rejects.toThrow(/rejected the API key/);
+    });
+
+    it("fails the login when the gateway cannot be reached", async () => {
+      const { login } = setup(() => {
+        throw new TypeError("fetch failed");
+      });
+      const { value } = interaction({
+        select: "custom",
+        text: "http://localhost:9",
+        secret: "tk",
+      });
+      await expect(login(value)).rejects.toThrow(
+        "Could not reach Otari at http://localhost:9/api/v1: fetch failed",
+      );
+    });
+
+    it("cancels when no key is entered", async () => {
+      const { login, fetchMock } = setup(modelsOk);
+      const { value } = interaction({ select: "otari", secret: "  " });
+      await expect(login(value)).rejects.toThrow("Login cancelled");
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("resolves a stored key with its gateway, and an environment key with OTARI_BASE_URL", async () => {
+      const { auth, own } = setup(modelsOk);
+      const signal = new AbortController().signal;
+      const ctx = {
+        env: async (name: string) =>
+          name === "OTARI_API_KEY" ? "tk_env" : undefined,
+        fileExists: async () => false,
+      };
+
+      expect(
+        await auth.resolve({
+          ctx,
+          signal,
+          credential: {
+            type: "api_key",
+            key: "tk_eu",
+            env: { OTARI_BASE_URL: "https://eu.api.otari.ai/api/v1" },
+          },
+        }),
+      ).toMatchObject({
+        auth: { apiKey: "tk_eu", baseUrl: "https://eu.api.otari.ai/api/v1" },
+        source: "stored credential",
+      });
+      expect(own.baseUrl).toBe("https://eu.api.otari.ai/api/v1");
+
+      // After /logout the environment pair applies again.
+      expect(await auth.resolve({ ctx, signal })).toMatchObject({
+        auth: { apiKey: "tk_env", baseUrl: "https://api.otari.ai/api/v1" },
+        source: "OTARI_API_KEY",
+      });
+      expect(own.baseUrl).toBe("https://api.otari.ai/api/v1");
+
+      // A key saved before logins recorded a gateway uses OTARI_BASE_URL.
+      expect(
+        await auth.resolve({
+          ctx,
+          signal,
+          credential: { type: "api_key", key: "tk_old" },
+        }),
+      ).toMatchObject({
+        auth: { apiKey: "tk_old", baseUrl: "https://api.otari.ai/api/v1" },
+      });
+    });
+
+    it("discovers models from the gateway a stored credential names", async () => {
+      const { own, fetchMock } = setup((url) =>
+        url.endsWith("/tools")
+          ? noTools.clone()
+          : new Response(JSON.stringify({ data: [{ id: "mzai:eu" }] }), {
+              status: 200,
+            }),
+      );
+      const pi = fakePi();
+      registerOtariProvider(pi, own, [], {
+        fetch: fetchMock as unknown as typeof fetch,
+      });
+      const provider = registeredProvider(pi);
+      await provider.refreshModels?.(
+        refreshContext({
+          credential: {
+            type: "api_key",
+            key: "tk_eu",
+            env: { OTARI_BASE_URL: "https://eu.api.otari.ai/api/v1" },
+          },
+        }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://eu.api.otari.ai/api/v1/models",
+        expect.anything(),
+      );
+      expect(provider.getModels()).toEqual([
+        expect.objectContaining({
+          id: "mzai:eu",
+          baseUrl: "https://eu.api.otari.ai/api/v1",
+        }),
+      ]);
+    });
   });
 
   it("keeps OTARI_MODELS as a static provider baseline", () => {

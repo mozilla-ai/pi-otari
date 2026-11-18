@@ -1,7 +1,16 @@
 import type { OtariConfig } from "./types.js";
 
-const DEFAULT_BASE_URL = "https://api.otari.ai/api/v1";
-const HOSTED_HOSTNAME = new URL(DEFAULT_BASE_URL).hostname;
+/** The otari.ai regions, each with its own API root. A key works only in the region that minted it. */
+export const HOSTED_REGIONS = [
+  { id: "otari", label: "otari.ai", baseUrl: "https://api.otari.ai/api/v1" },
+  {
+    id: "otari-eu",
+    label: "otari.ai, EU region",
+    baseUrl: "https://eu.api.otari.ai/api/v1",
+  },
+] as const;
+
+export const DEFAULT_BASE_URL: string = HOSTED_REGIONS[0].baseUrl;
 const DEFAULT_TIMEOUT_MS = 5000;
 const LOOPBACK_HOSTS = new Set(["localhost", "::1", "[::1]"]);
 const IPV4_LOOPBACK_PATTERN = /^127(?:\.\d{1,3}){3}$/;
@@ -48,24 +57,40 @@ function parseModels(value: string | undefined): string[] {
   ];
 }
 
-function parseBaseUrl(value: string | undefined): {
+/** The otari.ai region served from this hostname, if any. */
+export function hostedRegionFor(hostname: string) {
+  return HOSTED_REGIONS.find(
+    (region) => new URL(region.baseUrl).hostname === hostname,
+  );
+}
+
+export interface Deployment {
   baseUrl: string;
   officialHosted: boolean;
-} {
+}
+
+/**
+ * Validate a gateway base URL. `name` is how the value is named in errors.
+ * With `addPrefix`, a bare origin gets Otari's /api/v1 prefix instead of
+ * being rejected, for a URL typed at the login prompt.
+ */
+export function parseBaseUrl(
+  value: string | undefined,
+  name = "OTARI_BASE_URL",
+  { addPrefix = false }: { addPrefix?: boolean } = {},
+): Deployment {
   let url: URL;
   try {
     url = new URL(value?.trim() || DEFAULT_BASE_URL);
   } catch {
-    throw new ConfigError("OTARI_BASE_URL must be a valid absolute URL");
+    throw new ConfigError(`${name} must be a valid absolute URL`);
   }
   if (url.username || url.password) {
-    throw new ConfigError(
-      "OTARI_BASE_URL must not contain embedded credentials",
-    );
+    throw new ConfigError(`${name} must not contain embedded credentials`);
   }
   if (url.search || url.hash) {
     throw new ConfigError(
-      "OTARI_BASE_URL must not contain a query string or fragment",
+      `${name} must not contain a query string or fragment`,
     );
   }
   if (
@@ -73,27 +98,41 @@ function parseBaseUrl(value: string | undefined): {
     !(url.protocol === "http:" && isLoopbackHost(url.hostname))
   ) {
     throw new ConfigError(
-      "OTARI_BASE_URL must use HTTPS; HTTP is allowed only for loopback hosts",
+      `${name} must use HTTPS; HTTP is allowed only for loopback hosts`,
     );
   }
-  const baseUrl = url.toString().replace(/\/+$/, "");
+  let baseUrl = url.toString().replace(/\/+$/, "");
   // Pi appends /chat/completions and discovery appends /models, so the value
   // must carry the gateway's API prefix; no Otari gateway serves those at the
   // origin. Otari's own docs tell OpenAI-style clients the same thing.
   if (baseUrl === url.origin) {
+    if (!addPrefix) {
+      throw new ConfigError(
+        `${name} must include the API prefix, for example ${url.origin}/api/v1`,
+      );
+    }
+    baseUrl = `${url.origin}/api/v1`;
+  }
+  const region = hostedRegionFor(url.hostname);
+  // Each otari.ai region has exactly one API root. Anything else on that
+  // host, such as the retired /v1 prefix, would fail every request, so say so
+  // at startup.
+  if (region && baseUrl !== region.baseUrl) {
     throw new ConfigError(
-      `OTARI_BASE_URL must include the API prefix, for example ${url.origin}/api/v1`,
+      `Hosted Otari serves its API at ${region.baseUrl}; set ${name} to that URL`,
     );
   }
-  const officialHosted = url.hostname === HOSTED_HOSTNAME;
-  // Hosted Otari has exactly one API root. Anything else on that host, such as
-  // the retired /v1 prefix, would fail every request, so say so at startup.
-  if (officialHosted && baseUrl !== DEFAULT_BASE_URL) {
-    throw new ConfigError(
-      `Hosted Otari serves its API at ${DEFAULT_BASE_URL}; set OTARI_BASE_URL to that URL or leave it unset`,
-    );
-  }
-  return { baseUrl, officialHosted };
+  return { baseUrl, officialHosted: region !== undefined };
+}
+
+/**
+ * Point the shared config at another deployment, such as the one a stored
+ * /login credential names. Every consumer reads `config.baseUrl` per call,
+ * so discovery, requests and routing follow.
+ */
+export function useDeployment(config: OtariConfig, deployment: Deployment) {
+  config.baseUrl = deployment.baseUrl;
+  config.officialHosted = deployment.officialHosted;
 }
 
 export function loadOtariConfig(
