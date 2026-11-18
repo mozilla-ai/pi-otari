@@ -29,14 +29,18 @@ jobs:
       - name: Validate package
         run: npm run check
 
-      - name: Verify release tag matches package version
+      - name: Derive package version from release tag
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         shell: bash
         run: |
-          package_version="$(node --print 'require("./package.json").version')"
-          if [[ "$GITHUB_REF_NAME" != "v$package_version" ]]; then
-            echo "Release tag $GITHUB_REF_NAME does not match package version $package_version" >&2
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$ ]]; then
+            echo "Release tag $RELEASE_TAG is not of the form v<semver>" >&2
             exit 1
           fi
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
 
       - name: Verify build did not modify the checkout
         shell: bash
@@ -51,6 +55,8 @@ jobs:
 
       - name: Create immutable package artifact from committed source
         id: package
+        env:
+          PACKAGE_VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -58,6 +64,7 @@ jobs:
           mkdir -p "$package_dir"
           git archive "$GITHUB_SHA" | tar -x -C "$package_dir"
           cd "$package_dir"
+          npm version "$PACKAGE_VERSION" --no-git-tag-version --allow-same-version --ignore-scripts
           npm pack --ignore-scripts --json > npm-pack.json
           package_file="$(node --input-type=module -e '
             import { readFileSync } from "node:fs";
