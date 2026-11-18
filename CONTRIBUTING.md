@@ -126,16 +126,10 @@ Use `npm install` when adding, removing, or upgrading dependencies, and commit b
 
 Releases are published to npm through GitHub Actions and npm trusted publishing.
 
-1. Update `package.json` and `package-lock.json` together:
-
-   ```bash
-   npm version <version> --no-git-tag-version
-   ```
-
-2. Open and merge the version pull request after CI passes.
-3. Publish a GitHub Release whose tag exactly matches `v<version>`.
-4. Verify the `Publish to npm` workflow succeeds.
-5. Verify the published version and distribution tags:
+1. Publish a GitHub Release whose tag is `v<version>` (for example `v0.7.0` or `v1.0.0-rc.1`). The tag must be valid semver with a `v` prefix.
+2. The `Publish to npm` workflow takes the version from the tag and writes it into the packaged `package.json`, so you do not need a version bump pull request. The `version` in the repository's `package.json` is not used for publishing.
+3. Verify the `Publish to npm` workflow succeeds.
+4. Verify the published version and distribution tags:
 
    ```bash
    npm view @mozilla-ai/pi-otari version dist-tags --json
