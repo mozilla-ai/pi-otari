@@ -29,7 +29,7 @@ describe("model mapping", () => {
       contextWindow: 200000,
       maxTokens: 32000,
       source: "standard",
-      cost: { input: 3, output: 15, cacheRead: 0, cacheWrite: 0 },
+      cost: { input: 3, output: 15, cacheRead: 3, cacheWrite: 3 },
     });
   });
 
@@ -52,6 +52,61 @@ describe("model mapping", () => {
         reasoning: false,
         input: undefined,
       }),
+    ]);
+  });
+
+  it("reads reasoning from Otari's supported_parameters", () => {
+    const models = parseStandardModelList({
+      data: [
+        {
+          id: "deepseek/deepseek-v4-flash",
+          supported_parameters: ["tools", "tool_choice", "reasoning"],
+        },
+        { id: "openai/gpt-4o", supported_parameters: ["tools"] },
+        {
+          id: "x/flagged",
+          reasoning: false,
+          supported_parameters: ["reasoning"],
+        },
+        { id: "x/unknown" },
+      ],
+    });
+
+    expect(models.map((model) => model.reasoning)).toEqual([
+      true,
+      false,
+      false,
+      undefined,
+    ]);
+    expect(toProviderModel(models[0]).reasoning).toBe(true);
+  });
+
+  it("prices cache reads and writes, at the input rate when unset", () => {
+    const models = parseStandardModelList({
+      data: [
+        {
+          id: "deepseek/deepseek-v4-flash",
+          pricing: {
+            input_price_per_million: 0.28,
+            output_price_per_million: 0.42,
+            cache_read_price_per_million: 0.028,
+            cache_write_price_per_million: 0,
+          },
+        },
+        {
+          id: "x/no-cache-rates",
+          pricing: {
+            input_price_per_million: 1,
+            output_price_per_million: 2,
+            cache_read_price_per_million: null,
+          },
+        },
+      ],
+    });
+
+    expect(models.map((model) => model.cost)).toEqual([
+      { input: 0.28, output: 0.42, cacheRead: 0.028, cacheWrite: 0 },
+      { input: 1, output: 2, cacheRead: 1, cacheWrite: 1 },
     ]);
   });
 
