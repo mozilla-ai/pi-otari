@@ -52,6 +52,34 @@ function price(value: unknown): number {
     : 0;
 }
 
+/** A cache rate, or the input rate when unset, which is how Otari bills it. */
+function cachePrice(value: unknown, input: number): number {
+  return value === null || value === undefined ? input : price(value);
+}
+
+/**
+ * Whether the entry marks the model as reasoning-capable: an explicit
+ * `reasoning` flag, else `reasoning` in Otari's `supported_parameters`.
+ */
+function parseReasoning(item: Record<string, unknown>): boolean | undefined {
+  if (typeof item.reasoning === "boolean") return item.reasoning;
+  if (!Array.isArray(item.supported_parameters)) return undefined;
+  return item.supported_parameters.includes("reasoning");
+}
+
+function parseCost(
+  pricing: Record<string, unknown> | undefined,
+): ModelCost | undefined {
+  if (!pricing) return undefined;
+  const input = price(pricing.input_price_per_million);
+  return {
+    input,
+    output: price(pricing.output_price_per_million),
+    cacheRead: cachePrice(pricing.cache_read_price_per_million, input),
+    cacheWrite: cachePrice(pricing.cache_write_price_per_million, input),
+  };
+}
+
 function parseInput(value: unknown): Array<"text" | "image"> | undefined {
   if (!Array.isArray(value)) return undefined;
   const supported = value.filter(
@@ -71,25 +99,17 @@ function parseStandardEntry(value: unknown): OtariModel | undefined {
   const item = record(value);
   if (!item || typeof item.id !== "string" || item.id.trim() === "")
     return undefined;
-  const pricing = record(item.pricing);
   return {
     id: item.id.trim(),
     name:
       typeof item.name === "string" && item.name.trim()
         ? item.name.trim()
         : undefined,
-    reasoning: typeof item.reasoning === "boolean" ? item.reasoning : undefined,
+    reasoning: parseReasoning(item),
     input: parseInput(item.input_modalities) ?? parseModality(item.modality),
     contextWindow: positiveNumber(item.context_window),
     maxTokens: positiveNumber(item.max_output_tokens),
-    cost: pricing
-      ? {
-          input: price(pricing.input_price_per_million),
-          output: price(pricing.output_price_per_million),
-          cacheRead: 0,
-          cacheWrite: 0,
-        }
-      : undefined,
+    cost: parseCost(record(item.pricing)),
     source: "standard",
   };
 }

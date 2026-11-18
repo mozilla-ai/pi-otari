@@ -83,7 +83,7 @@ The stages, in order:
 | `OTARI_LIVE_TEST_MODEL` | required | A selector that gateway lists. Prefer an instruct model: reasoning models spend the output cap before producing text. |
 | `OTARI_LIVE_TEST_BASE_URL` | `https://api.otari.ai/api/v1` | Gateway URL including its API prefix. |
 | `OTARI_LIVE_TEST_MAX_TOKENS` | `8` | Output cap for both completions. |
-| `OTARI_LIVE_TEST_REASONING` | unset | One of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Otari does not yet mark models as reasoning-capable, so the run marks the selected model itself, sends the level, and fails unless the reply carries reasoning content. Pair it with a reasoning model and raise the output cap. |
+| `OTARI_LIVE_TEST_REASONING` | unset | One of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The run marks the selected model as reasoning-capable even when Otari does not, sends the level, and fails unless the reply carries reasoning content. Pair it with a reasoning model and raise the output cap. |
 
 Against hosted Otari:
 

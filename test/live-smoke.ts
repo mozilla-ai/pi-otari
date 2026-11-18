@@ -352,11 +352,11 @@ async function main(): Promise<void> {
       /**
        * The prompt travels as a user's does: Pi's agent loop, the extension's
        * stream wrapper, and pi-ai's streaming client, with output capped at
-       * the configured bound. Otari publishes no reasoning flag yet (#6), so
-       * the extension registers every model with reasoning off and Pi would
-       * clamp the level. Mark the copy the way the extension marks a reasoning
-       * model, so the level reaches the gateway through the same transport
-       * and the reply carries reasoning content.
+       * the configured bound. A model whose entry does not list `reasoning`
+       * in `supported_parameters` is registered with reasoning off, and Pi
+       * would clamp the level. Mark the copy the way the extension marks a
+       * reasoning model, so the level reaches the gateway through the same
+       * transport and the reply carries reasoning content.
        */
       await stage("streaming completion through Pi", async (note) => {
         const selected = {
