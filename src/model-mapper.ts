@@ -106,7 +106,10 @@ function parseStandardEntry(value: unknown): OtariModel | undefined {
         ? item.name.trim()
         : undefined,
     reasoning: parseReasoning(item),
-    input: parseInput(item.input_modalities) ?? parseModality(item.modality),
+    input:
+      parseInput(item.input_modalities) ??
+      parseInput(record(item.architecture)?.input_modalities) ??
+      parseModality(item.modality),
     contextWindow: positiveNumber(item.context_window),
     maxTokens: positiveNumber(item.max_output_tokens),
     cost: parseCost(record(item.pricing)),
