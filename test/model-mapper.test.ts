@@ -55,6 +55,64 @@ describe("model mapping", () => {
     ]);
   });
 
+  it("reads input modalities from the architecture object", () => {
+    const models = parseStandardModelList({
+      data: [
+        {
+          id: "deepseek/deepseek-v4.1-flash-1017",
+          object: "model",
+          type: "chat",
+          architecture: {
+            input_modalities: ["text", "image"],
+            output_modalities: ["text"],
+          },
+        },
+        {
+          id: "example/text-only",
+          architecture: { input_modalities: ["text"] },
+        },
+      ],
+    });
+    expect(models.map((model) => model.input)).toEqual([
+      ["text", "image"],
+      ["text"],
+    ]);
+    expect(toProviderModel(models[0]).input).toEqual(["text", "image"]);
+    expect(toProviderModel(models[1]).input).toEqual(["text"]);
+  });
+
+  it("prefers top-level input_modalities over architecture", () => {
+    const [model] = parseStandardModelList({
+      data: [
+        {
+          id: "example/model",
+          input_modalities: ["text"],
+          architecture: { input_modalities: ["text", "image"] },
+        },
+      ],
+    });
+    expect(model.input).toEqual(["text"]);
+  });
+
+  it("stays text-only when no modality info is declared", () => {
+    const [model] = parseStandardModelList({
+      data: [{ id: "example/model", architecture: { output_modalities: [] } }],
+    });
+    expect(model.input).toBeUndefined();
+    expect(toProviderModel(model).input).toEqual(["text"]);
+  });
+
+  it.each(["image", null, ["text", "image"]])(
+    "ignores a malformed architecture value: %j",
+    (architecture) => {
+      const [model] = parseStandardModelList({
+        data: [{ id: "example/model", architecture }],
+      });
+      expect(model.input).toBeUndefined();
+      expect(toProviderModel(model).input).toEqual(["text"]);
+    },
+  );
+
   it("reads reasoning from Otari's supported_parameters", () => {
     const models = parseStandardModelList({
       data: [
