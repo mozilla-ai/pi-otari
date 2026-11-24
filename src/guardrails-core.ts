@@ -7,6 +7,12 @@ import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 export const GUARDRAILS_ENTRY = "otari-guardrails";
 
 const HOOK_TIMEOUT_MS = 20_000;
+// A Stop check can run judge and verifier gates (model and script calls)
+// before the required gates are evaluated; otari bounds those to 540s in
+// total. Cutting the hook off earlier fails it open, which would let a slow
+// advisory judge skip a required gate. 600s matches Claude Code's own hook
+// timeout, which otari sizes those budgets under. Esc still cancels it.
+const STOP_HOOK_TIMEOUT_MS = 600_000;
 // Otari truncates the session's commands itself; this only bounds the payload.
 const MAX_RECORDED_COMMANDS = 200;
 export const GUARDED_TOOLS = new Set(["bash", "read", "edit", "write"]);
@@ -23,7 +29,10 @@ export interface GuardrailsDependencies {
   env?: NodeJS.ProcessEnv;
   /** Home directory holding user-level `~/.otari` rules. */
   home?: string;
+  /** How long a tool-call check may take. */
   timeoutMs?: number;
+  /** How long a Stop check may take. */
+  stopTimeoutMs?: number;
 }
 
 export type Harness = "pi" | "claude-code";
@@ -202,6 +211,7 @@ export function createGuardrails(
   const env = dependencies.env ?? process.env;
   const home = dependencies.home ?? homedir();
   const timeoutMs = dependencies.timeoutMs ?? HOOK_TIMEOUT_MS;
+  const stopTimeoutMs = dependencies.stopTimeoutMs ?? STOP_HOOK_TIMEOUT_MS;
 
   let bashCommands: string[] = [];
   let warnedFailure = false;
@@ -275,7 +285,9 @@ export function createGuardrails(
     const bin = resolveBinary(env);
     if (!bin || !guardrailsExist(ctx.cwd, home)) return { kind: "skip" };
 
-    const timeout = AbortSignal.timeout(timeoutMs);
+    const timeout = AbortSignal.timeout(
+      event === "Stop" ? stopTimeoutMs : timeoutMs,
+    );
     const signal = ctx.signal
       ? AbortSignal.any([ctx.signal, timeout])
       : timeout;
