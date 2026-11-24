@@ -65,6 +65,7 @@ function register(
   env: Record<string, string> = {},
   timeoutMs?: number,
   host: "pi" | "omp" = "pi",
+  stopTimeoutMs?: number,
 ) {
   handlers = {};
   sendMessage = vi.fn();
@@ -80,6 +81,7 @@ function register(
     env: { OTARI_HOOK_BIN: bin, PATH: "", ...env },
     home,
     timeoutMs,
+    stopTimeoutMs,
   });
 }
 
@@ -377,6 +379,21 @@ describe("guardrails", () => {
     register({}, 200);
     expect(await toolCall("bash", { command: "ls" })).toBeUndefined();
     expect(notify.mock.calls[0][0]).toContain("timed out");
+  });
+
+  it("gives a Stop check longer than a tool call, so a slow judge cannot skip a required gate", async () => {
+    await scenario({ code: 2, stderr: "run make lint" });
+    // Slower than the tool-call timeout, well inside the Stop one.
+    await writeFile(
+      bin,
+      (await readFile(bin, "utf8")).replace("P=$(cat)", "P=$(cat)\nsleep 0.5"),
+    );
+    register({}, 200, "pi", 5_000);
+    expect(await toolCall("bash", { command: "ls" })).toBeUndefined();
+    expect(notify.mock.calls[0][0]).toContain("timed out");
+    const result = await settle();
+    expect(result?.continue).toBe(true);
+    expect(result?.entries).toEqual([guardrailsEntry("run make lint")]);
   });
 
   it("does nothing when no guardrails file exists", async () => {

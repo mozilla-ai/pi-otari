@@ -178,7 +178,7 @@ Pi obeys the same Otari agent guardrails as Claude Code and Codex: the rules in 
 - Advisory feedback meant for the model, such as a failed `judge` gate, is added to the session without forcing a continuation.
 - An advisory `systemMessage` from `otari` is shown as a notification.
 
-Guardrails are active only when the `otari` binary is on `PATH` (or set `OTARI_HOOK_BIN`) and a guardrails file exists, searching from the working directory up to the git root and then `~/.otari/`. Set `OTARI_GUARDRAILS=off` to disable them. If `otari` cannot be run, times out after about 20 seconds or exits unexpectedly, the action is allowed and you get a single warning.
+Guardrails are active only when the `otari` binary is on `PATH` (or set `OTARI_HOOK_BIN`) and a guardrails file exists, searching from the working directory up to the git root and then `~/.otari/`. Set `OTARI_GUARDRAILS=off` to disable them. If `otari` cannot be run, times out or exits unexpectedly, the action is allowed and you get a single warning. A tool-call check times out after 20 seconds. The check when the agent finishes may run model-judged gates first, so it gets 10 minutes, as Claude Code gives its hooks; press Esc to cancel it.
 
 Install an `otari` release with `--harness pi` support for full fidelity, including the commands Pi ran in the session. With an older `otari`, the extension detects the missing support once and sends Claude Code-shaped payloads instead, without the session's command list on stop checks.
 
