@@ -4,6 +4,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   createGuardrails,
+  EDIT_TOOLS,
   GUARDED_TOOLS,
   GUARDRAILS_ENTRY,
   type GuardrailsDependencies,
@@ -38,6 +39,14 @@ export function registerGuardrails(
   // is the point where the next run may be continued again.
   pi.on("agent_settled", () => {
     continued = false;
+  });
+
+  // A blocked or failed edit changed nothing, so it moves no cutoff.
+  pi.on("tool_result", (event) => {
+    if (EDIT_TOOLS.has(event.toolName) && !event.isError) {
+      guardrails.recordEdit();
+    }
+    return undefined;
   });
 
   pi.on("tool_call", async (event, ctx) => {

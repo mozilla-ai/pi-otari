@@ -10,6 +10,8 @@ const HOOK_TIMEOUT_MS = 20_000;
 // Otari truncates the session's commands itself; this only bounds the payload.
 const MAX_RECORDED_COMMANDS = 200;
 export const GUARDED_TOOLS = new Set(["bash", "read", "edit", "write"]);
+/** Tools whose successful result starts a new window of command evidence. */
+export const EDIT_TOOLS = new Set(["edit", "write"]);
 const CLAUDE_TOOL_NAMES: Record<string, string> = {
   bash: "Bash",
   read: "Read",
@@ -175,6 +177,11 @@ export interface Guardrails {
   ): Promise<Outcome>;
   /** Remember a bash command for the next Stop payload. */
   recordBash(command: string): void;
+  /**
+   * An edit succeeded: forget the commands before it, so a command a gate
+   * requires counts only if it ran after the last change it should check.
+   */
+  recordEdit(): void;
   /** Forget the session's bash commands (a new session started). */
   reset(): void;
   notify(
@@ -205,7 +212,13 @@ export function createGuardrails(
     message: string,
     level: "info" | "warning" = "info",
   ) => {
-    if (ctx.hasUI) ctx.ui.notify(message, level);
+    if (ctx.hasUI) {
+      ctx.ui.notify(message, level);
+      return;
+    }
+    // Print and JSON modes have no UI; stderr keeps the notice out of the
+    // output stream a caller parses.
+    process.stderr.write(`${message}\n`);
   };
 
   const failOpen = (ctx: GuardrailsContext, reason: string) => {
@@ -336,6 +349,9 @@ export function createGuardrails(
       if (bashCommands.length > MAX_RECORDED_COMMANDS) {
         bashCommands = bashCommands.slice(-MAX_RECORDED_COMMANDS);
       }
+    },
+    recordEdit() {
+      bashCommands = [];
     },
     reset() {
       bashCommands = [];
