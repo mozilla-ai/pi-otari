@@ -88,6 +88,18 @@ const toolCall = (toolName: string, input: Record<string, unknown>) =>
     { type: "tool_call", toolCallId: "1", toolName, input },
     ctx(),
   );
+const toolResult = (toolName: string, isError = false) =>
+  handlers.tool_result(
+    {
+      type: "tool_result",
+      toolCallId: "1",
+      toolName,
+      input: {},
+      content: [],
+      isError,
+    },
+    ctx(),
+  );
 const settle = (
   overrides: {
     outcome?: string;
@@ -172,6 +184,28 @@ describe("guardrails", () => {
   it("ignores tools it does not guard", async () => {
     expect(await toolCall("grep", { pattern: "x" })).toBeUndefined();
     expect(await calls()).toHaveLength(0);
+  });
+
+  it("writes an advisory to stderr when there is no UI", async () => {
+    const stderr = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    try {
+      await scenario({ stdout: JSON.stringify({ systemMessage: "heads up" }) });
+      await handlers.tool_call(
+        {
+          type: "tool_call",
+          toolCallId: "1",
+          toolName: "read",
+          input: { path: "/x" },
+        },
+        ctx({ hasUI: false }),
+      );
+      expect(notify).not.toHaveBeenCalled();
+      expect(stderr).toHaveBeenCalledWith("heads up\n");
+    } finally {
+      stderr.mockRestore();
+    }
   });
 
   it("shows a systemMessage advisory without blocking", async () => {
@@ -294,6 +328,25 @@ describe("guardrails", () => {
     const commands = (await calls()).at(-1)?.payload.bash_commands as string[];
     expect(commands).toHaveLength(200);
     expect(commands[0]).toBe("c5");
+  });
+
+  it("drops the commands before a successful edit", async () => {
+    await toolCall("bash", { command: "make lint" });
+    await toolCall("edit", { path: "src/a.py" });
+    toolResult("edit");
+    await toolCall("bash", { command: "pytest" });
+    await settle();
+    expect((await calls()).at(-1)?.payload.bash_commands).toEqual(["pytest"]);
+  });
+
+  it("keeps the commands before a failed edit", async () => {
+    await toolCall("bash", { command: "make lint" });
+    toolResult("write", true);
+    toolResult("read");
+    await settle();
+    expect((await calls()).at(-1)?.payload.bash_commands).toEqual([
+      "make lint",
+    ]);
   });
 
   it("resets the recorded bash commands on session_start", async () => {
@@ -469,6 +522,13 @@ describe("omp guardrails", () => {
       },
       { deliverAs: "nextTurn" },
     );
+  });
+
+  it("drops the commands before a successful edit", async () => {
+    await toolCall("bash", { command: "make lint" });
+    toolResult("write");
+    await stop();
+    expect((await calls()).at(-1)?.payload.bash_commands).toEqual([]);
   });
 
   it("resets the recorded bash commands on session_switch", async () => {
